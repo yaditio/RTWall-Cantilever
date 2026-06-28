@@ -1,6 +1,6 @@
 # 🧱 RT Wall - Cantilever
 
-**RT Wall - Cantilever** is a unified, interactive web application designed for the analysis, design, and verification of cantilever retaining walls. The application integrates classical geotechnical analytical calculations, 2D Finite Element Method (FEM) simulation using **OpenSees**, ultimate concrete bending capacity checks using **concreteproperties**, and if necessary, soil-structure interaction via Winkler pile analysis using **openpile**.
+**RT Wall - Cantilever** is a unified, interactive web application designed for the analysis, design, and verification of cantilever retaining walls. The application integrates classical geotechnical analytical calculations, soil stress distribution and bearing capacity analysis using **groundhog**, 2D Finite Element Method (FEM) simulation using **OpenSees**, ultimate concrete bending capacity checks using **concreteproperties**, and if necessary, soil-structure interaction via Winkler pile analysis using **openpile**.
 
 ---
 
