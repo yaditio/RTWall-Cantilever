@@ -1685,7 +1685,7 @@ if enable_pile:
 st.markdown("""
 <div class="dashboard-header">
     <h1>🧱 Cantilever Retaining Wall Designer</h1>
-    <p>Unified Engineering & Finite Element Analysis Studio</p>
+    <p>Preliminary Cantilever Retaining Wall Design tool</p>
 </div>
 """, unsafe_allow_html=True)
 
