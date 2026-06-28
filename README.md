@@ -32,7 +32,10 @@ This software is not a certified engineering design tool and should not be used 
 
 ### Prerequisites
 - Python 3.8 to 3.10 (OpenPile and dependencies do not currently support Python 3.11+).
-- Cairo graphics library (needed by `drawsvg` for raster image outputs).
+- Cairo graphics library (needed by `drawsvg` for PNG/raster image outputs). Install on Ubuntu/Debian via:
+  ```bash
+  sudo apt install libcairo2
+  ```
 
 ### Steps
 1. Clone the repository and navigate into the folder:
