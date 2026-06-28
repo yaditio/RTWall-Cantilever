@@ -1,6 +1,6 @@
 # 🧱 RT Wall - Cantilever
 
-**RT Wall - Cantilever** is a unified, interactive web application designed for the analysis, design, and verification of cantilever retaining walls and pile foundations. The application integrates classical geotechnical analytical calculations, 2D Finite Element Method (FEM) simulation using **OpenSees**, ultimate concrete bending capacity checks using **concreteproperties**, and soil-structure interaction via Winkler pile analysis using **openpile**.
+**RT Wall - Cantilever** is a unified, interactive web application designed for the analysis, design, and verification of cantilever retaining walls. The application integrates classical geotechnical analytical calculations, 2D Finite Element Method (FEM) simulation using **OpenSees**, ultimate concrete bending capacity checks using **concreteproperties**, and if necessary, soil-structure interaction via Winkler pile analysis using **openpile**.
 
 ---
 
@@ -31,23 +31,36 @@ This software is not a certified engineering design tool and should not be used 
 ## 🛠️ Local Installation & Run
 
 ### Prerequisites
-- Python 3.8 to 3.10 (OpenPile and dependencies do not currently support Python 3.11+).
-- Cairo graphics library (needed by `drawsvg` for PNG/raster image outputs). Install on Ubuntu/Debian via:
-  ```bash
-  sudo apt install libcairo2
-  ```
+- Python 3.8 to 3.10 is required (OpenPile and other dependencies do not support Python 3.11+).
+- Cairo graphics library (needed by `drawsvg` for generating PNG/raster formats).
 
-### Steps
-1. Clone the repository and navigate into the folder:
+### Steps using Anaconda (Recommended)
+If you do not have Anaconda installed, download it from the [Official Anaconda Website](https://www.anaconda.com/).
+
+1. **Clone the repository**:
    ```bash
    git clone <your-repository-url>
    cd "RT Wall - Cantilever"
    ```
-2. Install Python dependencies:
+
+2. **Create and activate a Python 3.10 Conda environment**:
+   ```bash
+   conda create -n python310 python=3.10 -y
+   conda activate python310
+   ```
+
+3. **Install the Cairo graphics dependency**:
+   ```bash
+   conda install -c conda-forge cairo -y
+   ```
+   *(Alternatively, on Ubuntu/Debian systems you can install it using: `sudo apt install libcairo2`)*
+
+4. **Install Python dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
-3. Run the Streamlit web server:
+
+5. **Run the Streamlit app**:
    ```bash
    streamlit run App.py
    ```
@@ -68,6 +81,21 @@ docker build -t rt-wall-cantilever .
 docker run -d -p 8501:8501 rt-wall-cantilever
 ```
 Once started, access the app at `http://localhost:8501`.
+
+---
+
+## 📦 Core Libraries & Dependencies
+
+This application uses the following libraries:
+- [Streamlit](https://streamlit.io/) — Python web UI framework.
+- [OpenSeesPy](https://openseespy.github.io/manual/index.html) — 2D/3D finite element analysis solver.
+- [concreteproperties](https://concreteproperties.readthedocs.io/) — Concrete cross-section structural design verification.
+- [sectionproperties](https://sectionproperties.readthedocs.io/) — Structural section property calculations.
+- [openpile](https://github.com/pypile/openpile) — Winkler model implementation for lateral pile deflections.
+- [groundhog](https://groundhog.readthedocs.io/) — Geotechnical engineering calculator library.
+- [drawsvg](https://github.com/cduck/drawsvg) — SVG programmatic drawing generator.
+- [NumPy](https://numpy.org/) & [pandas](https://pandas.pydata.org/) — Data parsing and numerical matrices.
+- [Matplotlib](https://matplotlib.org/) — Geometry plotting and visualization engine.
 
 ---
 
