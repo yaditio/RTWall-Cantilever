@@ -149,12 +149,12 @@ tab_geom, tab_soil, tab_struct, tab_seismic, tab_reinf, tab_bearing, tab_pile = 
 
 with tab_geom:
     t = st.number_input('Out-of-plane thickness (m)', value=1.0, step=0.01, format="%.3f")
-    Hw = st.number_input('Wall height (m)', value=4.5, step=0.01, format="%.3f")
-    toe = st.number_input('Toe length (m)', value=1.0, step=0.01, format="%.3f")
-    heel = st.number_input('Heel length (m)', value=1.75, step=0.01, format="%.3f")
-    top_wall = st.number_input('Top wall thickness (m)', value=0.25, step=0.01, format="%.3f")
-    bot_wall = st.number_input('Bottom wall thickness (m)', value=0.45, step=0.01, format="%.3f")
-    h_ftg = st.number_input('Footing thickness (m)', value=0.25, step=0.01, format="%.3f")
+    Hw = st.number_input('Wall height (m)', value=3.0, step=0.01, format="%.3f")
+    toe = st.number_input('Toe length (m)', value=0.8, step=0.01, format="%.3f")
+    heel = st.number_input('Heel length (m)', value=0.8, step=0.01, format="%.3f")
+    top_wall = st.number_input('Top wall thickness (m)', value=0.3, step=0.01, format="%.3f")
+    bot_wall = st.number_input('Bottom wall thickness (m)', value=0.4, step=0.01, format="%.3f")
+    h_ftg = st.number_input('Footing thickness (m)', value=0.3, step=0.01, format="%.3f")
 
 with tab_soil:
     # Soil parameters
@@ -169,13 +169,18 @@ with tab_soil:
     else:
         width_surcharge = 1e5
         offset_surcharge = 0.0
-    h_soil = st.number_input('Soil height above heel (m)', value=4.5, step=0.01, format="%.3f")
-    h_soil_toe = st.number_input('Soil above toe (m)', value=0.1, step=0.01, format="%.3f")
+    h_soil = st.number_input('Soil height above heel (m)', value=3.0, step=0.01, format="%.3f")
+    h_soil_toe = st.number_input('Soil above toe (m)', value=1.0, step=0.01, format="%.3f")
 
     # Water parameters
     gamma_w = st.number_input('Water unit weight (kN/m3)', value=9.81, step=0.01, format="%.2f")
     Hwtr = st.number_input('Water height behind wall (m)', value=0.5, step=0.01, format="%.2f")
     Hwtr_front = st.number_input('Water height in front of wall (m)', value=0.15, step=0.01, format="%.3f")
+
+    # Soil Spring Parameters (for Winkler subgrade model)
+    st.subheader("Soil Spring Properties")
+    Es_soil = st.number_input('Soil Young\'s Modulus Es (kPa)', value=40000.0, step=1000.0, format="%.1f", help="Typical: Sand 10,000-50,000 kPa; Clay 5,000-25,000 kPa")
+    nu_soil = st.number_input('Soil Poisson\'s Ratio ν', value=0.15, step=0.05, format="%.2f", min_value=0.0, max_value=0.49)
 
 with tab_seismic:
     #Seismic Parameter
@@ -236,9 +241,27 @@ with tab_bearing:
         else:
             su_val = 0.0
         FS_bearing = st.number_input('Bearing Capacity Safety Factor (FS)', value=3.0, step=0.1, format="%.2f")
+        
+        st.subheader("Consolidation Settlement")
+        consol_type = st.selectbox('Consolidation Type', ['Normally Consolidated (NC)', 'Overconsolidated (OC)'], index=0)
+        H0_consol = st.number_input('Compressible Layer Thickness H₀ (m)', value=1.0, step=0.5, format="%.1f")
+        e0_consol = st.number_input('Initial Void Ratio e₀', value=0.8, step=0.05, format="%.2f")
+        Cc_consol = st.number_input('Compression Index Cc', value=0.3, step=0.05, format="%.3f")
+        if consol_type == 'Overconsolidated (OC)':
+            Cr_consol = st.number_input('Recompression Index Cr', value=0.05, step=0.01, format="%.3f")
+            pc_consol = st.number_input('Preconsolidation Pressure p\'c (kPa)', value=200.0, step=10.0, format="%.1f")
+        else:
+            Cr_consol = 0.05
+            pc_consol = 200.0
     else:
         bearing_soil_type = 'Sand (Drained)'
         su_val = 0.0
+        consol_type = 'Normally Consolidated (NC)'
+        H0_consol = 5.0
+        e0_consol = 0.8
+        Cc_consol = 0.3
+        Cr_consol = 0.05
+        pc_consol = 200.0
         
 with tab_pile:
     enable_pile = st.checkbox('Enable Pile Foundation Analysis', value=False)
@@ -285,6 +308,14 @@ with tab_pile:
         FS_pile_axial = st.number_input('Axial Safety Factor (piles)', value=2.5, step=0.1, format="%.2f")
         FS_pile_lateral = st.number_input('Lateral Safety Factor (piles)', value=2.5, step=0.1, format="%.2f")
         pile_loading_type = st.selectbox('OpenPile Loading Type', ['static', 'cyclic'], index=0)
+        
+        st.subheader("Pile Axial Settlement")
+        if pile_soil_type == 'Sand (Drained)':
+            delta_pile_axial = st.number_input('Pile-Soil Interface Friction Angle δ (deg)', value=round(phi_pile_soil * 0.7, 1), step=1.0, format="%.1f")
+            alpha_pile_axial = 0.5
+        else:
+            alpha_pile_axial = st.number_input('Adhesion Factor α (clay)', value=0.5, step=0.05, format="%.2f")
+            delta_pile_axial = 20.0
     else:
         pile_shape = 'Circle'
         pile_material = 'Concrete'
@@ -305,9 +336,11 @@ with tab_pile:
         FS_pile_axial = 2.5
         FS_pile_lateral = 2.5
         pile_loading_type = 'static'
+        delta_pile_axial = 20.0
+        alpha_pile_axial = 0.5
 
 # Derived geometry
-ftg = toe + heel + top_wall + bot_wall  # total footing length
+ftg = toe + heel + bot_wall  # total footing length
 taper = bot_wall - top_wall
 taper_length = np.sqrt(taper**2 + Hw**2)
 
@@ -517,29 +550,35 @@ sigma_w_dict = {}
 
 for node, z in wall_nodes.items():
 
-    # Soil pressure (z is elevation from top of footing)
-    h_dry_z = max(0.0, h_soil - max(z, Hwtr))
-    h_wet_z = max(0.0, min(h_soil, Hwtr) - z)
-    sigma_soil = Ka * (gamma_soil_dry * h_dry_z + gamma_soil_wet * h_wet_z)
+    # Pressures only exist below h_soil
+    if z <= h_soil:
+        # Soil pressure (z is elevation from top of footing)
+        h_dry_z = max(0.0, h_soil - max(z, Hwtr))
+        h_wet_z = max(0.0, min(h_soil, Hwtr) - z)
+        sigma_soil = Ka * (gamma_soil_dry * h_dry_z + gamma_soil_wet * h_wet_z)
 
-    # Surcharge pressure
-    if surcharge_type == 'Strip Load':
-        depth_below_surface = max(1e-5, h_soil - z)
-        res_q = stresses_stripload_retainingwall_local(
-            imposedstress=q,
-            width=width_surcharge,
-            offset=offset_surcharge,
-            toe_depth=h_soil,
-            depth=depth_below_surface
-        )
-        sigma_q = res_q['delta sigma x [kPa]']
-    else:
-        sigma_q = Ka * q
+        # Surcharge pressure
+        if surcharge_type == 'Strip Load':
+            depth_below_surface = max(1e-5, h_soil - z)
+            res_q = stresses_stripload_retainingwall_local(
+                imposedstress=q,
+                width=width_surcharge,
+                offset=offset_surcharge,
+                toe_depth=h_soil,
+                depth=depth_below_surface
+            )
+            sigma_q = res_q['delta sigma x [kPa]']
+        else:
+            sigma_q = Ka * q
 
-    # Water pressure
-    if z <= Hwtr:
-        sigma_w = gamma_w * (Hwtr - z)
+        # Water pressure
+        if z <= Hwtr:
+            sigma_w = gamma_w * (Hwtr - z)
+        else:
+            sigma_w = 0.0
     else:
+        sigma_soil = 0.0
+        sigma_q = 0.0
         sigma_w = 0.0
 
     # Total lateral pressure (kN/m2)
@@ -700,14 +739,54 @@ for node, L in bottom_trib.items():
     Fy = uplift_pressure.get(node, 0.0) * L * t   # upward force
     ops.load(node, 0.0, Fy)
 
-# Support information
-# Fix bottom nodes in vertical DOF; fix leftmost bottom node in both DOFs
+# Passive soil resistance on toe side footing face (mobilized using FS_passive = 2.0)
+FS_passive = 2.0
+Kp = np.tan(np.radians(45.0 + phi / 2.0)) ** 2
+sigma_p_top = (Kp * gamma_soil_dry * h_soil_toe) / FS_passive
+sigma_p_bot = (Kp * gamma_soil_dry * (h_soil_toe + h_ftg)) / FS_passive
+
+F_passive_top = ((2.0 * sigma_p_top + sigma_p_bot) / 6.0) * h_ftg * t
+F_passive_bot = ((sigma_p_top + 2.0 * sigma_p_bot) / 6.0) * h_ftg * t
+
+# Apply positive X force on the front face nodes of the footing (toe side)
+ops.load(top_node_ids[0], float(F_passive_top), 0.0)
+ops.load(bottom_node_ids[0], float(F_passive_bot), 0.0)
+
+# Total passive force (integrated)
+P_passive = 0.5 * (sigma_p_top + sigma_p_bot) * h_ftg * t
+
+# Support information - Winkler Soil Spring Model
+# Compute subgrade reaction modulus using Vesic's formula: ks = Es / (B * (1 - nu^2))
+ks_subgrade = Es_soil / (ftg * (1.0 - nu_soil**2))
+
+# Create spring material for vertical DOF
+spring_mat_base_id = 100  # material tag offset for springs
+spring_elem_base_id = 1000  # element tag offset for springs
+
+# Create anchor nodes below bottom nodes (fixed) and connect with zero-length springs
+anchor_node_base_id = 200  # node tag offset for anchor nodes
+for idx, nid in enumerate(bottom_node_ids):
+    anchor_nid = anchor_node_base_id + idx
+    x_coord = ops.nodeCoord(nid, 1)
+    y_coord = ops.nodeCoord(nid, 2)
+    ops.node(anchor_nid, float(x_coord), float(y_coord))
+    ops.fix(anchor_nid, 1, 1)  # fully fixed anchor node
+    
+    # Compute spring stiffness = ks * tributary_length * t
+    L_trib = bottom_trib.get(nid, ftg / len(bottom_node_ids))
+    k_spring = ks_subgrade * L_trib * t
+    
+    # Create elastic spring material (unique per node to allow different stiffnesses)
+    mat_id = spring_mat_base_id + idx
+    ops.uniaxialMaterial('Elastic', mat_id, float(k_spring))
+    
+    # Create zero-length element connecting anchor to bottom node (vertical spring, DOF 2)
+    elem_tag = spring_elem_base_id + idx
+    ops.element('zeroLength', elem_tag, anchor_nid, nid, '-mat', mat_id, '-dir', 2)
+
+# Fix leftmost bottom node in horizontal DOF only (prevent rigid-body sliding)
 leftmost_bottom = bottom_node_ids[0]
-ops.fix(leftmost_bottom, 1, 1)
-for nid in bottom_node_ids[1:]:
-    ops.fix(nid, 0, 1)
-# Also fix the top-of-footing leftmost node in horizontal DOF to prevent rigid
-ops.fix(top_node_ids[0], 1, 0)
+ops.fix(leftmost_bottom, 1, 0)
 
 ops.system('BandSPD')
 ops.numberer('RCM')
@@ -788,7 +867,7 @@ for i in range(1, total_nodes + 1):
 
 # 1. Total lateral (resultant) from Fx dictionary (kN)
 try:
-    total_lateral_resultant = -sum(Fx.values())  # sign: Fx stored as negative for earth pressure
+    total_lateral_resultant = -sum(Fx.values()) - P_passive  # sign: Fx stored as negative, so -sum(Fx) is positive active. Subtracting P_passive reduces it.
 except Exception:
     total_lateral_resultant = 0.0
 
@@ -904,8 +983,12 @@ except Exception:
 
 try:
     phi_rad = np.radians(phi)
+    # R_slide is the base friction resistance (W * tan(phi))
     R_slide = max(0.0, W_down_global) * np.tan(phi_rad)
-    F_drive = total_lateral_resultant
+    # F_drive is the net driving lateral force (Active + Surcharge + Hydrostatic - Passive)
+    # Since passive resistance is applied in OpenSees as a positive horizontal load,
+    # total_lateral_resultant (-sum(Fx)) naturally subtracts it.
+    F_drive = max(0.0, total_lateral_resultant)
     FS_slide_global = R_slide / F_drive if F_drive > 0 else float('inf')
 except Exception:
     R_slide = 0.0
@@ -961,6 +1044,59 @@ for i in range(1, total_nodes + 1):
             max_disp_y = dy
     except Exception:
         pass
+
+# 9b. FEM-Based Settlement Analysis (from soil spring model)
+try:
+    # Toe settlement (leftmost bottom node) - y displacement (downward is negative)
+    disp_toe_x = ops.nodeDisp(bottom_node_ids[0], 1)
+    disp_toe_y = ops.nodeDisp(bottom_node_ids[0], 2)
+    settlement_toe_mm = abs(disp_toe_y) * 1000.0  # convert m to mm
+    
+    # Heel settlement (rightmost bottom node)
+    disp_heel_x = ops.nodeDisp(bottom_node_ids[-1], 1)
+    disp_heel_y = ops.nodeDisp(bottom_node_ids[-1], 2)
+    settlement_heel_mm = abs(disp_heel_y) * 1000.0
+    
+    # Differential settlement
+    diff_settlement_mm = abs(disp_toe_y - disp_heel_y) * 1000.0
+    
+    # Rotation (radians and degrees)
+    dist_toe_heel = abs(xs_unique[-1] - xs_unique[0])
+    if dist_toe_heel > 1e-6:
+        rotation_rad = np.arctan(abs(disp_toe_y - disp_heel_y) / dist_toe_heel)
+    else:
+        rotation_rad = 0.0
+    rotation_deg = np.degrees(rotation_rad)
+    
+    # Allowable differential settlement per SNI 8460:2017 = 50 mm
+    allowable_diff_settlement_mm = 50.0
+    diff_settlement_pass = diff_settlement_mm <= allowable_diff_settlement_mm
+    
+    # Build bottom node displacement table
+    bottom_disp_rows = []
+    for nid in bottom_node_ids:
+        try:
+            dx = ops.nodeDisp(nid, 1)
+            dy = ops.nodeDisp(nid, 2)
+            x_pos = ops.nodeCoord(nid, 1)
+            bottom_disp_rows.append({
+                'Node': nid,
+                'X Position (m)': round(x_pos, 3),
+                'Disp X (mm)': round(dx * 1000, 4),
+                'Disp Y (mm)': round(dy * 1000, 4),
+                'Settlement (mm)': round(abs(dy) * 1000, 4)
+            })
+        except Exception:
+            pass
+    df_bottom_disp = pd.DataFrame(bottom_disp_rows)
+except Exception:
+    settlement_toe_mm = 0.0
+    settlement_heel_mm = 0.0
+    diff_settlement_mm = 0.0
+    rotation_rad = 0.0
+    rotation_deg = 0.0
+    diff_settlement_pass = True
+    df_bottom_disp = pd.DataFrame()
 
 # 10. Generate Summary DataFrames
 df_lateral = pd.DataFrame()
@@ -1370,6 +1506,57 @@ if enable_bearing:
 
 
 # ----------------------------------------------------
+# Consolidation Settlement Analysis using Groundhog
+# ----------------------------------------------------
+consol_settlement_m = 0.0
+consol_settlement_mm = 0.0
+consol_allow_mm = 0.0
+consol_pass = True
+
+if enable_bearing:
+    try:
+        from groundhog.shallowfoundations.settlement import primaryconsolidationsettlement_nc, primaryconsolidationsettlement_oc
+        
+        # Effective stress increase at foundation base = net bearing pressure
+        delta_sigma_consol = max(0.0, sigma_max)
+        
+        if consol_type == 'Normally Consolidated (NC)':
+            res_consol = primaryconsolidationsettlement_nc(
+                initial_height=H0_consol,
+                initial_voidratio=e0_consol,
+                initial_effective_stress=max(1.0, p0_eff),
+                effective_stress_increase=delta_sigma_consol,
+                compression_index=Cc_consol,
+                validate=False
+            )
+        else:
+            res_consol = primaryconsolidationsettlement_oc(
+                initial_height=H0_consol,
+                initial_voidratio=e0_consol,
+                initial_effective_stress=max(1.0, p0_eff),
+                preconsolidation_pressure=pc_consol,
+                effective_stress_increase=delta_sigma_consol,
+                compression_index=Cc_consol,
+                recompression_index=Cr_consol,
+                validate=False
+            )
+        
+        consol_settlement_m = abs(res_consol.get('delta z [m]', 0.0))
+        consol_settlement_mm = consol_settlement_m * 1000.0
+        
+        # Allowable settlement per SNI 8460:2017: 15 cm + B(cm)/600
+        B_cm = ftg * 100.0  # convert m to cm
+        consol_allow_cm = 15.0 + B_cm / 600.0
+        consol_allow_mm = consol_allow_cm * 10.0  # convert cm to mm
+        
+        consol_pass = consol_settlement_mm <= consol_allow_mm
+    except Exception as e:
+        consol_settlement_m = 0.0
+        consol_settlement_mm = 0.0
+        consol_allow_mm = 0.0
+        consol_pass = True
+
+# ----------------------------------------------------
 # Base Anchor (Pile) Foundation Analysis
 # ----------------------------------------------------
 pile_pass_toe_axial = True
@@ -1378,12 +1565,17 @@ pile_pass_heel_axial = True
 pile_pass_heel_lateral = True
 pile_pass_toe_interaction = True
 pile_pass_heel_interaction = True
+pile_pass_toe_settlement = True
+pile_pass_heel_settlement = True
+settlement_toe_pile = 0.0
+settlement_heel_pile = 0.0
+allowable_pile_settlement_mm = 0.0
 fig_pile_sec = None
 
 if enable_pile:
     try:
         from openpile.construct import PileSection, Pile, SoilProfile, Layer, Model
-        from openpile.soilmodels import API_sand, API_clay
+        from openpile.soilmodels import API_sand, API_clay, API_sand_axial, API_clay_axial
         from groundhog.deepfoundations.axialcapacity.skinfriction import API_unit_shaft_friction_sand_rp2geo, API_unit_shaft_friction_clay
         from groundhog.deepfoundations.axialcapacity.endbearing import API_unit_end_bearing_sand_rp2geo, API_unit_end_bearing_clay
         from sectionproperties.pre.geometry import CompoundGeometry
@@ -1506,7 +1698,7 @@ if enable_pile:
             H_ult = 9.0 * su_pile_soil * (diameter_pile if pile_shape == 'Circle' else width_x_pile) * (L_pile - 1.5 * (diameter_pile if pile_shape == 'Circle' else width_x_pile))
         H_allow = H_ult / FS_pile_lateral
 
-        # 4. OpenPile Lateral Winkler Analysis
+        # 4. OpenPile Lateral & Axial Winkler Analysis
         if pile_shape == 'Circle':
             p_elem = Pile.create_tubular(
                 name="Circular Pile",
@@ -1531,8 +1723,10 @@ if enable_pile:
 
         if pile_soil_type == 'Sand (Drained)':
             lat_model = API_sand(phi=phi_pile_soil, kind=pile_loading_type)
+            ax_model = API_sand_axial(delta=delta_pile_axial)
         else:
             lat_model = API_clay(Su=[su_pile_soil, su_pile_soil], eps50=eps50_pile_soil, kind=pile_loading_type)
+            ax_model = API_clay_axial(Su=[su_pile_soil, su_pile_soil], alpha_limit=alpha_pile_axial)
 
         sp_elem = SoilProfile(
             name="Pile Soil Profile",
@@ -1544,7 +1738,8 @@ if enable_pile:
                     top=0.0,
                     bottom=-L_pile,
                     weight=gamma_pile_soil,
-                    lateral_model=lat_model
+                    lateral_model=lat_model,
+                    axial_model=ax_model
                 )
             ]
         )
@@ -1566,6 +1761,20 @@ if enable_pile:
         M_max_toe = max(abs(res_toe.forces['M [kNm]']))
         V_max_heel = max(abs(res_heel.forces['V [kN]']))
         M_max_heel = max(abs(res_heel.forces['M [kNm]']))
+
+        # Extract axial pile head settlements (elevation = 0.0) in mm
+        try:
+            settlement_toe_pile = abs(res_toe.settlement.loc[res_toe.settlement['Elevation [m]'] == 0.0, 'Settlement [m]'].values[0]) * 1000.0
+            settlement_heel_pile = abs(res_heel.settlement.loc[res_heel.settlement['Elevation [m]'] == 0.0, 'Settlement [m]'].values[0]) * 1000.0
+        except Exception:
+            settlement_toe_pile = 0.0
+            settlement_heel_pile = 0.0
+
+        # Allowable pile settlement = 2% of diameter
+        pile_dia_val = diameter_pile if pile_shape == 'Circle' else width_x_pile
+        allowable_pile_settlement_mm = 0.02 * pile_dia_val * 1000.0
+        pile_pass_toe_settlement = settlement_toe_pile <= allowable_pile_settlement_mm
+        pile_pass_heel_settlement = settlement_heel_pile <= allowable_pile_settlement_mm
 
         # 5. concrete-properties Interaction Diagram
         material_concrete_pile = Concrete(
@@ -1751,6 +1960,44 @@ with kpi_cols[concrete_col_idx]:
                   value="PASS" if concrete_pass else "FAIL", 
                   delta="Design Safe" if concrete_pass else "Overstressed",
                   delta_color="normal" if concrete_pass else "inverse")
+
+# 2b. Settlement KPI Row
+st.markdown("### 📏 Settlement & Deformation KPIs (SNI 8460:2017)")
+settlement_cols = st.columns(4)
+
+with settlement_cols[0]:
+    with st.container(border=True):
+        status_diff = "PASS (≤50mm)" if diff_settlement_pass else "FAIL (≤50mm)"
+        delta_color_diff = "normal" if diff_settlement_pass else "inverse"
+        st.metric(label="FEM Diff. Settlement", value=f"{diff_settlement_mm:.2f} mm", delta=status_diff, delta_color=delta_color_diff)
+
+with settlement_cols[1]:
+    with st.container(border=True):
+        st.metric(label="FEM Rotation", value=f"{rotation_deg:.4f}°", delta="Toe vs Heel", delta_color="off")
+
+if enable_bearing:
+    with settlement_cols[2]:
+        with st.container(border=True):
+            status_consol = f"PASS (≤{consol_allow_mm:.1f}mm)" if consol_pass else f"FAIL (≤{consol_allow_mm:.1f}mm)"
+            delta_color_consol = "normal" if consol_pass else "inverse"
+            st.metric(label="Consol. Settlement", value=f"{consol_settlement_mm:.2f} mm", delta=status_consol, delta_color=delta_color_consol)
+else:
+    with settlement_cols[2]:
+        with st.container(border=True):
+            st.metric(label="Consol. Settlement", value="N/A", delta="Not Enabled", delta_color="off")
+
+if enable_pile:
+    with settlement_cols[3]:
+        with st.container(border=True):
+            max_pile_settle = max(settlement_toe_pile, settlement_heel_pile)
+            pile_settle_pass = max_pile_settle <= allowable_pile_settlement_mm
+            status_pile_settle = f"PASS (≤{allowable_pile_settlement_mm:.1f}mm)" if pile_settle_pass else f"FAIL (≤{allowable_pile_settlement_mm:.1f}mm)"
+            delta_color_pile_settle = "normal" if pile_settle_pass else "inverse"
+            st.metric(label="Max Pile Settlement", value=f"{max_pile_settle:.2f} mm", delta=status_pile_settle, delta_color=delta_color_pile_settle)
+else:
+    with settlement_cols[3]:
+        with st.container(border=True):
+            st.metric(label="Max Pile Settlement", value="N/A", delta="Not Enabled", delta_color="off")
 
 # 3. Two-Column Dashboard Content Grid
 col_left, col_right = st.columns([1, 1])
@@ -2195,7 +2442,7 @@ with col_left:
         try:
             mult = 1000
             y_shift = 0.8 * mult
-            x_shift = 0.8 * mult
+            x_shift = 1.5 * mult
             max_height = max(Hw, h_soil, h_soil_toe, Hwtr, Hwtr_front) + h_ftg
             
             # Initialize drawing
@@ -2282,53 +2529,89 @@ with col_left:
             # 3. Dynamic loads
             if selected_load_plot in ['soil lateral', 'total']:
                 # Soil lateral pressure profile: active soil + surcharge
+                h_active = min(Hw, h_soil)
                 if surcharge_type == 'Strip Load':
-                    q_top = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - Hw))['delta sigma x [kPa]']
+                    q_top = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - h_active))['delta sigma x [kPa]'] if h_soil > 0 else 0.0
                     q_bot = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, h_soil)['delta sigma x [kPa]']
                 else:
-                    q_top = Ka * q
-                    q_bot = Ka * q
-                p_top = Ka * (gamma_soil_dry * max(0.0, h_soil - Hw)) + q_top
-                p_bot = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot
+                    q_top = Ka * q if h_soil > 0 else 0.0
+                    q_bot = Ka * q if h_soil > 0 else 0.0
                 
-                # Scale: max pressure maps to 1.2 meters screen-wise
-                p_max_lat = max(p_top, p_bot, 1.0)
-                scale_lat = 1.2 * mult / p_max_lat
+                p_top = Ka * (gamma_soil_dry * max(0.0, h_soil - h_active)) + q_top if h_soil > 0 else 0.0
+                p_bot = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot if h_soil > 0 else 0.0
                 
-                # Draw shaded pressure block
-                d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -(h_ftg+Hw)*mult - y_shift,
-                                    (toe+bot_wall)*mult + x_shift + p_top*scale_lat, -(h_ftg+Hw)*mult - y_shift,
+                # Passive soil resistance on toe side (mobilized using FS_passive_val = 2.0)
+                FS_passive_val = 2.0
+                Kp_val = np.tan(np.radians(45.0 + phi / 2.0)) ** 2
+                p_p_top = (Kp_val * gamma_soil_dry * h_soil_toe) / FS_passive_val if h_soil_toe > 0 else 0.0
+                p_p_bot = (Kp_val * gamma_soil_dry * (h_soil_toe + h_ftg)) / FS_passive_val
+                
+                # Scale: responsive scaling relative to reference of 30 kPa (auto-caps if larger)
+                p_max_lat = max(p_top, p_bot, p_p_bot, 1.0)
+                scale_lat = 1.2 * mult / max(30.0, p_max_lat)
+                
+                # Draw shaded active pressure block (only up to h_active)
+                d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -(h_ftg+h_active)*mult - y_shift,
+                                    (toe+bot_wall)*mult + x_shift + p_top*scale_lat, -(h_ftg+h_active)*mult - y_shift,
                                     (toe+bot_wall)*mult + x_shift + p_bot*scale_lat, -h_ftg*mult - y_shift,
                                     (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
                                     close=True, fill='#E67E22', fill_opacity=0.3, stroke='#D35400', stroke_width=12))
                 
-                # Draw arrows (spaced evenly)
+                # Draw active pressure arrows
                 n_arr = 5
                 for i in range(n_arr):
                     frac = i / (n_arr - 1)
-                    z_val = frac * Hw
-                    hd = max(0.0, h_soil - max(z_val, Hwtr))
-                    hw = max(0.0, min(h_soil, Hwtr) - z_val)
-                    if surcharge_type == 'Strip Load':
-                        q_z = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - z_val))['delta sigma x [kPa]']
+                    z_val = frac * h_active
+                    if h_soil > 0:
+                        hd = max(0.0, h_soil - max(z_val, Hwtr))
+                        hw = max(0.0, min(h_soil, Hwtr) - z_val)
+                        if surcharge_type == 'Strip Load':
+                            q_z = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - z_val))['delta sigma x [kPa]']
+                        else:
+                            q_z = Ka * q
+                        pz = Ka * (gamma_soil_dry * hd + gamma_soil_wet * hw) + q_z
                     else:
-                        q_z = Ka * q
-                    pz = Ka * (gamma_soil_dry * hd + gamma_soil_wet * hw) + q_z
+                        pz = 0.0
                     y_z = -(h_ftg + z_val)*mult - y_shift
                     x_start = (toe + bot_wall)*mult + x_shift + pz * scale_lat
                     x_end = (toe + bot_wall)*mult + x_shift
                     if pz > 0:
                         draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#D35400', stroke_width=10, head_len=60, head_width=35)
                 
-                # Label pressures
-                d_load.append(draw.Text(f"{p_top:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_top*scale_lat + 0.20*mult, -(h_ftg+Hw)*mult - y_shift, fill='black'))
-                d_load.append(draw.Text(f"{p_bot:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_bot*scale_lat + 0.20*mult, -h_ftg*mult - y_shift, fill='black'))
+                # Draw shaded passive pressure block on the left (toe side)
+                d_load.append(draw.Lines(x_shift, -(h_ftg + h_soil_toe)*mult - y_shift,
+                                    x_shift - p_p_top*scale_lat, -(h_ftg + h_soil_toe)*mult - y_shift,
+                                    x_shift - p_p_bot*scale_lat, -h_ftg*mult - y_shift,
+                                    x_shift, -h_ftg*mult - y_shift,
+                                    close=True, fill='#2ECC71', fill_opacity=0.3, stroke='#27AE60', stroke_width=12))
+                
+                # Draw passive pressure arrows (pointing right towards footing face, increasing with depth)
+                n_arr_p = 3
+                for i in range(n_arr_p):
+                    frac = i / (n_arr_p - 1)
+                    z_val = frac * (h_soil_toe + h_ftg)
+                    # depth from surface of toe soil is (h_soil_toe + h_ftg) - z_val
+                    depth_p = (h_soil_toe + h_ftg) - z_val
+                    pz_p = (Kp_val * gamma_soil_dry * depth_p) / FS_passive_val
+                    y_z = -z_val*mult - y_shift
+                    x_start = x_shift - pz_p * scale_lat
+                    x_end = x_shift
+                    if pz_p > 0:
+                        draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#27AE60', stroke_width=10, head_len=60, head_width=35)
+
+                # Label active pressures
+                d_load.append(draw.Text(f"{p_top:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_top*scale_lat + 0.20*mult, -(h_ftg+h_active)*mult - y_shift, fill='#D35400', font_weight='bold'))
+                d_load.append(draw.Text(f"{p_bot:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_bot*scale_lat + 0.20*mult, -h_ftg*mult - y_shift, fill='#D35400', font_weight='bold'))
+                
+                # Label passive pressures
+                d_load.append(draw.Text(f"{p_p_top:.2f} kPa", 0.20*mult, x_shift - p_p_top*scale_lat - 0.95*mult, -(h_ftg+h_soil_toe)*mult - y_shift, fill='#27AE60', font_weight='bold'))
+                d_load.append(draw.Text(f"{p_p_bot:.2f} kPa", 0.20*mult, x_shift - p_p_bot*scale_lat - 0.95*mult, -h_ftg*mult - y_shift, fill='#27AE60', font_weight='bold'))
 
             if selected_load_plot in ['soil vertical', 'total']:
                 # Soil vertical load on heel: weight + surcharge
                 p_v = q_soil + q
-                # Scale: max vertical pressure maps to 0.8 meters
-                scale_v = 0.8 * mult / max(p_v, 1.0)
+                # Scale: responsive scaling relative to reference of 150 kPa (auto-caps if larger)
+                scale_v = 0.8 * mult / max(150.0, p_v)
                 
                 # Draw shaded block above footing heel
                 d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
@@ -2347,14 +2630,14 @@ with col_left:
                     draw_arrow_head(d_load, x_pos, y_start, x_pos, y_end, color='#E67E22', stroke_width=10, head_len=60, head_width=35)
                 
                 # Label pressure
-                d_load.append(draw.Text(f"{p_v:.2f} kPa", 0.20*mult, (toe+bot_wall + heel/2)*mult + x_shift, -h_ftg*mult - y_shift - p_v*scale_v - 0.22*mult, fill='black', text_anchor='middle'))
+                d_load.append(draw.Text(f"{p_v:.2f} kPa", 0.20*mult, (toe+bot_wall + heel/2)*mult + x_shift, -h_ftg*mult - y_shift - p_v*scale_v - 0.22*mult, fill='#E67E22', text_anchor='middle', font_weight='bold'))
 
             if selected_load_plot in ['hydrostatic', 'total']:
                 # Hydrostatic water pressure
                 p_w_back = gamma_w * Hwtr
                 p_w_front = gamma_w * Hwtr_front
                 p_max_w = max(p_w_back, p_w_front, 1.0)
-                scale_w = 1.2 * mult / p_max_w
+                scale_w = 1.2 * mult / max(20.0, p_max_w)
                 
                 # Back water pressure triangle
                 if Hwtr > 0:
@@ -2374,7 +2657,8 @@ with col_left:
                         if pz_w > 0:
                             draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#2980B9', stroke_width=10, head_len=50, head_width=30)
                     
-                    d_load.append(draw.Text(f"{p_w_back:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_w_back*scale_w + 0.20*mult, -h_ftg*mult - y_shift, fill='black'))
+                    # Offset the label vertically to avoid overlap with lateral soil pressure at the base
+                    d_load.append(draw.Text(f"{p_w_back:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_w_back*scale_w + 0.20*mult, -(h_ftg - 0.25)*mult - y_shift, fill='#2980B9', font_weight='bold'))
 
                 # Front water pressure triangle
                 if Hwtr_front > 0:
@@ -2394,14 +2678,14 @@ with col_left:
                         if pz_w > 0:
                             draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#2980B9', stroke_width=10, head_len=50, head_width=30)
                     
-                    d_load.append(draw.Text(f"{p_w_front:.2f} kPa", 0.20*mult, toe*mult + x_shift - p_w_front*scale_w - 0.85*mult, -h_ftg*mult - y_shift, fill='black'))
+                    d_load.append(draw.Text(f"{p_w_front:.2f} kPa", 0.20*mult, toe*mult + x_shift - p_w_front*scale_w - 0.85*mult, -h_ftg*mult - y_shift, fill='#2980B9', font_weight='bold'))
 
             if selected_load_plot in ['uplift', 'total']:
                 # Uplift pressure profile acting upwards under base
                 p_upl = gamma_w * Hwtr
                 if p_upl > 0:
-                    # Scale: uplift pressure maps to 0.6 meters screen-wise
-                    scale_u = 0.6 * mult / p_upl
+                    # Scale: responsive scaling relative to reference of 20 kPa (auto-caps if larger)
+                    scale_u = 0.6 * mult / max(20.0, p_upl)
                     
                     # Draw shaded uplift block below the base
                     d_load.append(draw.Lines(x_shift, -y_shift,
@@ -2419,7 +2703,7 @@ with col_left:
                         y_end = -y_shift
                         draw_arrow_head(d_load, x_pos, y_start, x_pos, y_end, color='#8E44AD', stroke_width=10, head_len=50, head_width=30)
                         
-                    d_load.append(draw.Text(f"{p_upl:.2f} kPa", 0.20*mult, (ftg/2)*mult + x_shift, -y_shift + p_upl*scale_u + 0.25*mult, fill='black', text_anchor='middle'))
+                    d_load.append(draw.Text(f"{p_upl:.2f} kPa", 0.20*mult, (ftg/2)*mult + x_shift, -y_shift + p_upl*scale_u + 0.25*mult, fill='#8E44AD', text_anchor='middle', font_weight='bold'))
 
             if selected_load_plot in ['seismic', 'total']:
                 # Pseudo-static horizontal seismic forces acting left at centroids
@@ -2476,21 +2760,28 @@ with col_left:
             water_lat_force = 0.0
             
         if selected_load_plot == 'soil lateral':
+            h_active = min(Hw, h_soil)
             if surcharge_type == 'Strip Load':
-                q_top = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - Hw))['delta sigma x [kPa]']
+                q_top = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - h_active))['delta sigma x [kPa]'] if h_soil > 0 else 0.0
                 q_bot = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, h_soil)['delta sigma x [kPa]']
             else:
-                q_top = Ka * q
-                q_bot = Ka * q
-            p_top = Ka * (gamma_soil_dry * max(0.0, h_soil - Hw)) + q_top
-            p_bot = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot
+                q_top = Ka * q if h_soil > 0 else 0.0
+                q_bot = Ka * q if h_soil > 0 else 0.0
+            p_top = Ka * (gamma_soil_dry * max(0.0, h_soil - h_active)) + q_top if h_soil > 0 else 0.0
+            p_bot = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot if h_soil > 0 else 0.0
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Max Lateral Pressure (Base)", f"{p_bot:.2f} kPa")
+                st.metric("Max Active Pressure (Base)", f"{p_bot:.2f} kPa")
+                st.metric("Max Passive Resistance (Base)", f"{p_p_bot:.2f} kPa", help="Mobilized passive earth pressure resistance (FS = 2.0)")
             with col2:
-                st.metric("Min Lateral Pressure (Top)", f"{p_top:.2f} kPa")
+                top_label = "Active Pressure (Soil Surface)" if h_soil < Hw else "Min Active Pressure (Top)"
+                st.metric(top_label, f"{p_top:.2f} kPa")
+                st.metric("Passive Resistance (Soil Surface)", f"{p_p_top:.2f} kPa", help="Mobilized passive earth pressure resistance (FS = 2.0)")
             with col3:
-                st.metric("Total Lateral Soil Force", f"{soil_lat_force:.2f} kN")
+                net_soil_force = max(0.0, soil_lat_force - P_passive)
+                st.metric("Active Lateral Force", f"{soil_lat_force:.2f} kN")
+                st.metric("Passive Resisting Force", f"{P_passive:.2f} kN", help="Mobilized passive resistance force (FS = 2.0)")
+                st.metric("Net Lateral Soil Force", f"{net_soil_force:.2f} kN", delta=f"-{P_passive:.2f} kN (Resisted)", delta_color="inverse")
                 
         elif selected_load_plot == 'soil vertical':
             if surcharge_type == 'Strip Load':
@@ -2546,8 +2837,9 @@ with col_left:
                 else:
                     q_bot = Ka * q
                 p_bot = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot
+                net_soil_force = max(0.0, soil_lat_force - P_passive)
                 st.metric("Max Soil Lateral Pressure", f"{p_bot:.2f} kPa")
-                st.metric("Soil Lateral Force", f"{soil_lat_force:.2f} kN")
+                st.metric("Net Soil Lateral Force", f"{net_soil_force:.2f} kN", delta=f"-{P_passive:.2f} kN (Resisted)", delta_color="inverse")
             with col2:
                 if surcharge_type == 'Strip Load':
                     n_pts = 10
@@ -2593,12 +2885,92 @@ with col_left:
                 
         # Detailed Load calculations in expanders
         with st.expander("📝 Show Analytical Load Calculations"):
-            st.markdown("#### Soil Lateral & Vertical Load")
+            # Compute all variables locally to avoid scope issues
+            Kp_calc = np.tan(np.radians(45.0 + phi / 2.0)) ** 2
+            FS_p = 2.0
+            h_active_calc = min(Hw, h_soil)
+            
+            # Active pressure values
+            if surcharge_type == 'Strip Load':
+                q_top_calc = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - h_active_calc))['delta sigma x [kPa]'] if h_soil > 0 else 0.0
+                q_bot_calc = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, h_soil)['delta sigma x [kPa]']
+            else:
+                q_top_calc = Ka * q if h_soil > 0 else 0.0
+                q_bot_calc = Ka * q if h_soil > 0 else 0.0
+            
+            pa_top_calc = Ka * (gamma_soil_dry * max(0.0, h_soil - h_active_calc)) + q_top_calc if h_soil > 0 else 0.0
+            pa_bot_calc = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot_calc if h_soil > 0 else 0.0
+            P_active_calc = 0.5 * (pa_top_calc + pa_bot_calc) * h_active_calc * t if h_soil > 0 else 0.0
+            
+            # Passive pressure values (mobilized)
+            pp_top_calc = (Kp_calc * gamma_soil_dry * h_soil_toe) / FS_p if h_soil_toe > 0 else 0.0
+            pp_bot_calc = (Kp_calc * gamma_soil_dry * (h_soil_toe + h_ftg)) / FS_p
+            P_passive_calc = 0.5 * (pp_top_calc + pp_bot_calc) * h_ftg * t
+            
+            # Dry and wet soil heights for active pressure
+            h_dry_active = max(0.0, h_soil - Hwtr)
+            h_wet_active = min(h_soil, Hwtr)
+            
+            st.markdown("### 🍂 Earth Pressure Coefficients")
             st.latex(r"K_a = \tan^2\left(45^\circ - \frac{\phi}{2}\right)")
-            st.latex(r"\sigma_{total} = \sigma_{soil} + \sigma_q + \sigma_w")
-            st.markdown(f"- **Friction Angle ($\phi$):** {phi}° &nbsp; | &nbsp; **Ka:** {Ka:.4f}")
-            st.markdown(f"- **Total lateral resultant:** {total_lateral_resultant:.3f} kN")
-            st.markdown(f"- **Total soil vertical (on heel):** {soil_total:.3f} kN")
+            st.latex(rf"K_a = \tan^2\left(45^\circ - \frac{{{phi:.1f}^\circ}}{{2}}\right) = \tan^2({45.0 - phi/2.0:.1f}^\circ) = {Ka:.4f}")
+            st.latex(r"K_p = \tan^2\left(45^\circ + \frac{\phi}{2}\right)")
+            st.latex(rf"K_p = \tan^2\left(45^\circ + \frac{{{phi:.1f}^\circ}}{{2}}\right) = \tan^2({45.0 + phi/2.0:.1f}^\circ) = {Kp_calc:.4f}")
+            st.info(f"**Ratio $K_p / K_a$ = {Kp_calc/Ka:.1f}** — Passive resistance per unit depth is {Kp_calc/Ka:.0f}× larger than active pressure.")
+            
+            st.markdown("---")
+            st.markdown("### 🔸 Active Earth Pressure (Backfill Side)")
+            st.markdown(f"Soil height behind wall: **{h_soil:.2f} m** &nbsp;|&nbsp; Stem height: **{Hw:.2f} m** &nbsp;|&nbsp; Active height: **{h_active_calc:.2f} m**")
+            st.markdown(f"Dry soil height: **{h_dry_active:.2f} m** &nbsp;|&nbsp; Wet soil height: **{h_wet_active:.2f} m**")
+            
+            st.markdown("**At top of active zone:**")
+            st.latex(rf"p_{{active,top}} = K_a \cdot \gamma_{{dry}} \cdot 0 + K_a \cdot q = {Ka:.4f} \times {q:.1f} = {q_top_calc:.2f}\;\text{{kPa}}")
+            
+            st.markdown("**At base of stem:**")
+            st.latex(rf"p_{{active,bot}} = K_a \left(\gamma_{{dry}} \cdot h_{{dry}} + \gamma_{{wet}} \cdot h_{{wet}}\right) + K_a \cdot q")
+            sigma_soil_dry_part = gamma_soil_dry * h_dry_active
+            sigma_soil_wet_part = gamma_soil_wet * h_wet_active
+            st.latex(rf"= {Ka:.4f} \times \left({gamma_soil_dry:.1f} \times {h_dry_active:.2f} + {gamma_soil_wet:.1f} \times {h_wet_active:.2f}\right) + {q_bot_calc:.2f}")
+            st.latex(rf"= {Ka:.4f} \times \left({sigma_soil_dry_part:.2f} + {sigma_soil_wet_part:.2f}\right) + {q_bot_calc:.2f}")
+            st.latex(rf"= {Ka:.4f} \times {sigma_soil_dry_part + sigma_soil_wet_part:.2f} + {q_bot_calc:.2f} = {pa_bot_calc:.2f}\;\text{{kPa}}")
+            
+            st.markdown("**Total Active Force:**")
+            st.latex(rf"P_{{active}} = \frac{{1}}{{2}} (p_{{top}} + p_{{bot}}) \times h_{{active}} \times t")
+            st.latex(rf"= \frac{{1}}{{2}} \times ({pa_top_calc:.2f} + {pa_bot_calc:.2f}) \times {h_active_calc:.2f} \times {t:.2f}")
+            st.latex(rf"= \boxed{{{P_active_calc:.2f}\;\text{{kN}}}}")
+            
+            st.markdown("---")
+            st.markdown("### 🟢 Mobilized Passive Earth Pressure (Toe Side)")
+            st.markdown(f"Soil above toe: **{h_soil_toe:.2f} m** &nbsp;|&nbsp; Footing thickness: **{h_ftg:.2f} m** &nbsp;|&nbsp; Mobilization FS: **{FS_p:.1f}**")
+            st.markdown("Passive pressure only acts on the **footing front face** (height = footing thickness).")
+            
+            st.markdown("**At footing top (depth = h_soil_toe):**")
+            pp_top_unreduced = Kp_calc * gamma_soil_dry * h_soil_toe
+            st.latex(rf"p_{{passive,top}} = \frac{{K_p \cdot \gamma_{{dry}} \cdot h_{{soil,toe}}}}{{FS_{{passive}}}}")
+            st.latex(rf"= \frac{{{Kp_calc:.4f} \times {gamma_soil_dry:.1f} \times {h_soil_toe:.2f}}}{{{FS_p:.1f}}} = \frac{{{pp_top_unreduced:.2f}}}{{{FS_p:.1f}}} = {pp_top_calc:.2f}\;\text{{kPa}}")
+            
+            st.markdown("**At footing bottom (depth = h_soil_toe + h_ftg):**")
+            pp_bot_unreduced = Kp_calc * gamma_soil_dry * (h_soil_toe + h_ftg)
+            st.latex(rf"p_{{passive,bot}} = \frac{{K_p \cdot \gamma_{{dry}} \cdot (h_{{soil,toe}} + h_{{ftg}})}}{{FS_{{passive}}}}")
+            st.latex(rf"= \frac{{{Kp_calc:.4f} \times {gamma_soil_dry:.1f} \times ({h_soil_toe:.2f} + {h_ftg:.2f})}}{{{FS_p:.1f}}} = \frac{{{pp_bot_unreduced:.2f}}}{{{FS_p:.1f}}} = {pp_bot_calc:.2f}\;\text{{kPa}}")
+            
+            st.markdown("**Total Passive Force (on footing face only):**")
+            st.latex(rf"P_{{passive}} = \frac{{1}}{{2}} (p_{{top}} + p_{{bot}}) \times h_{{ftg}} \times t")
+            st.latex(rf"= \frac{{1}}{{2}} \times ({pp_top_calc:.2f} + {pp_bot_calc:.2f}) \times {h_ftg:.2f} \times {t:.2f}")
+            st.latex(rf"= \boxed{{{P_passive_calc:.2f}\;\text{{kN}}}}")
+            
+            st.markdown("---")
+            st.markdown("### 🌊 Hydrostatic Water Lateral Force")
+            st.latex(rf"P_{{water}} = \frac{{1}}{{2}} \gamma_w H_{{wtr}}^2 \cdot t = \frac{{1}}{{2}} \times {gamma_w:.2f} \times {Hwtr:.2f}^2 \times {t:.2f} = {water_lat_force:.2f}\;\text{{kN}}")
+            
+            st.markdown("---")
+            st.markdown("### ⚖️ Net Lateral Force Summary")
+            P_net_calc = soil_lat_force + water_lat_force - P_passive_calc
+            st.latex(r"P_{net} = P_{active} + P_{water} - P_{passive}")
+            st.latex(rf"= {soil_lat_force:.2f} + {water_lat_force:.2f} - {P_passive_calc:.2f}")
+            st.latex(rf"= \boxed{{{P_net_calc:.2f}\;\text{{kN}}}}")
+            
+            st.markdown(f"- **Total soil vertical load (on heel):** `{soil_total:.3f} kN`")
             
             st.markdown("---")
             st.markdown("#### Concrete Self-Weight")
@@ -2623,6 +2995,16 @@ with col_left:
 
 # --- RIGHT COLUMN: ANALYSIS RESULTS ---
 with col_right:
+
+    # Remove zero-length support elements and anchor nodes to prevent errors in opsvis plotting
+    for idx in range(len(bottom_node_ids)):
+        elem_tag = spring_elem_base_id + idx
+        anchor_nid = anchor_node_base_id + idx
+        try:
+            ops.remove('element', elem_tag)
+            ops.remove('node', anchor_nid)
+        except Exception:
+            pass
 
     # Card C: Stem Bending Moment Diagram
     with st.container(border=True):
@@ -2742,7 +3124,7 @@ with col_right:
           - **FS = {fs_ot_global_val}** &nbsp;&nbsp; {status_badge_html(FS_ot_global, ot_limit)}
         
         - **Global Sliding Safety**:
-          - $R_{{sliding}}$ = **{R_slide:.3f} kN** &nbsp; | &nbsp; $F_{{driving}}$ = **{total_lateral_resultant:.3f} kN**
+          - $R_{{sliding}}$ = **{R_slide:.3f} kN** &nbsp; | &nbsp; $F_{{driving, net}}$ = **{F_drive:.3f} kN** (reduced by $P_{{passive}}$ = **{P_passive:.3f} kN**)
           - **FS = {fs_slide_global_val}** &nbsp;&nbsp; {status_badge_html(FS_slide_global, slide_limit)}
           
         - **Stem Junction Overturning Safety** (pivot $x={x_pivot_stem:.3f}$):
@@ -2755,6 +3137,10 @@ with col_right:
         - **Bearing Capacity Safety**:
           - $\\sigma_{{max}}$ = **{sigma_max:.3f} kPa** &nbsp; | &nbsp; $q_{{allow}}$ = **{q_allow:.3f} kPa** (SF = {FS_bearing:.2f})
           - **FS = {fs_bearing_val}** &nbsp;&nbsp; {status_badge_html(FS_actual_bearing, FS_bearing)}
+        
+        - **Consolidation Settlement (SNI 8460:2017)**:
+          - $s_{{consol}}$ = **{consol_settlement_mm:.2f} mm** &nbsp; | &nbsp; $s_{{allow}}$ = **{consol_allow_mm:.1f} mm** (15cm + B/600)
+          - **Status:** {"<span style='background-color:#28a745; color:white; padding:3px 10px; border-radius:12px; font-weight:bold; font-size:12px; text-transform:uppercase;'>PASS</span>" if consol_pass else "<span style='background-color:#dc3545; color:white; padding:3px 10px; border-radius:12px; font-weight:bold; font-size:12px; text-transform:uppercase;'>FAIL</span>"}
         """
         st.markdown(report_md, unsafe_allow_html=True)
         
@@ -2766,7 +3152,8 @@ with col_right:
             
             st.markdown("**Global Sliding Verification**")
             st.latex(r"R_{slide} = W_{down} \cdot \tan(\phi)")
-            st.latex(r"FS_{slide} = \frac{R_{slide}}{F_{drive}} \ge 1.5")
+            st.latex(r"F_{drive, net} = F_{active} - P_{passive}")
+            st.latex(r"FS_{slide} = \frac{R_{slide}}{F_{drive, net}} \ge 1.5")
             
             st.markdown("**Stem Overturning Verification**")
             st.latex(r"M_{ot} = \sum |F_{x,i} \cdot (x_i - x_{pivot})|")
@@ -2774,10 +3161,31 @@ with col_right:
             st.latex(r"FS_{ot} = \frac{M_{res}}{M_{ot}} \ge 1.5")
 
             if enable_bearing:
-                st.markdown("**Bearing Capacity Verification**")
+                st.markdown("**Bearing Capacity & Consolidation Settlement**")
                 st.latex(r"\sigma_{max} = \max(q_{toe}, q_{heel})")
                 st.latex(r"q_{allow} = \frac{q_{ult}}{FS_{bearing}}")
                 st.latex(r"FS_{actual} = \frac{q_{ult}}{\sigma_{max}} \ge FS_{bearing}")
+                st.markdown("**Consolidation Settlement Formulation:**")
+                st.latex(r"s_{consol} = \frac{H_0}{1 + e_0} C_c \log_{10} \frac{\sigma'_{v0} + \Delta\sigma'_v}{\sigma'_{v0}}\quad\text{(Normally Consolidated)}")
+                st.latex(r"s_{allow} = 15\text{ cm} + \frac{B\text{ (cm)}}{600}\quad\text{(Allowable Limit per SNI 8460:2017)}")
+
+    # Card E.2: FEM Settlement & Displacement Report (Winkler Springs)
+    with st.container(border=True):
+        st.subheader("📏 FEM Settlement & Displacement Report")
+        st.markdown('<div class="section-desc">Vertical and horizontal displacements at the base of the footing slab. Allowable limits from SNI 8460:2017.</div>', unsafe_allow_html=True)
+        
+        status_diff_html = "<span style='background-color:#28a745; color:white; padding:3px 10px; border-radius:12px; font-weight:bold; font-size:12px; text-transform:uppercase;'>PASS</span>" if diff_settlement_pass else "<span style='background-color:#dc3545; color:white; padding:3px 10px; border-radius:12px; font-weight:bold; font-size:12px; text-transform:uppercase;'>FAIL</span>"
+        
+        st.markdown(f"""
+        - **Toe Settlement (Node {bottom_node_ids[0]}):** **{settlement_toe_mm:.2f} mm** (X-disp: {disp_toe_x*1000:.2f} mm, Y-disp: {disp_toe_y*1000:.2f} mm)
+        - **Heel Settlement (Node {bottom_node_ids[-1]}):** **{settlement_heel_mm:.2f} mm** (X-disp: {disp_heel_x*1000:.2f} mm, Y-disp: {disp_heel_y*1000:.2f} mm)
+        - **Differential Settlement (Δs):** **{diff_settlement_mm:.2f} mm** (Allowable: **{allowable_diff_settlement_mm:.1f} mm**) {status_diff_html}
+        - **Footing Slab Rotation:** **{rotation_deg:.4f}°** ({rotation_rad:.6f} rad)
+        """, unsafe_allow_html=True)
+        
+        if not df_bottom_disp.empty:
+            with st.expander("📊 View Detailed Bottom Node Displacements (X and Y)"):
+                st.dataframe(df_bottom_disp, use_container_width=True)
 
     # Card F: Concrete Strength Verification
     with st.container(border=True):
@@ -3005,10 +3413,10 @@ if enable_pile:
                 
     with plot_col2:
         with st.container(border=True):
-            st.subheader("📈 Winkler Lateral Response")
-            st.markdown('<div class="section-desc">Pile deflection, shear force, and bending moment profiles.</div>', unsafe_allow_html=True)
+            st.subheader("📈 Winkler Response Profiles")
+            st.markdown('<div class="section-desc">Pile deflection, shear force, bending moment, and axial settlement profiles.</div>', unsafe_allow_html=True)
             try:
-                fig_winkler, (ax_d, ax_v, ax_m) = plt.subplots(1, 3, figsize=(10, 8), sharey=True)
+                fig_winkler, (ax_d, ax_v, ax_m, ax_s) = plt.subplots(1, 4, figsize=(12, 8), sharey=True)
                 
                 elevs_defl_toe = res_toe.deflection['Elevation [m]']
                 defl_toe = res_toe.deflection['Deflection [m]'] * 1000.0
@@ -3021,6 +3429,12 @@ if enable_pile:
                 elevs_forces_heel = res_heel.forces['Elevation [m]']
                 shear_heel = res_heel.forces['V [kN]']
                 moment_heel = res_heel.forces['M [kNm]']
+                
+                # Axial settlement profiles
+                elevs_settle_toe = res_toe.settlement['Elevation [m]']
+                settle_toe = abs(res_toe.settlement['Settlement [m]']) * 1000.0
+                elevs_settle_heel = res_heel.settlement['Elevation [m]']
+                settle_heel = abs(res_heel.settlement['Settlement [m]']) * 1000.0
                 
                 ax_d.plot(defl_toe, elevs_defl_toe, 'b-', label='Toe Pile')
                 ax_d.plot(defl_heel, elevs_defl_heel, 'r--', label='Heel Pile')
@@ -3038,6 +3452,11 @@ if enable_pile:
                 ax_m.plot(moment_heel, elevs_forces_heel, 'r--', label='Heel Pile')
                 ax_m.set_xlabel('Moment (kN·m)')
                 ax_m.grid(True)
+                
+                ax_s.plot(settle_toe, elevs_settle_toe, 'b-', label='Toe Pile')
+                ax_s.plot(settle_heel, elevs_settle_heel, 'r--', label='Heel Pile')
+                ax_s.set_xlabel('Axial Settlement (mm)')
+                ax_s.grid(True)
                 
                 fig_winkler.tight_layout()
                 st.pyplot(fig_winkler)
@@ -3117,7 +3536,7 @@ if enable_pile:
                 <th style="padding: 10px;">Check Item</th>
                 <th style="padding: 10px;">Demand (Actual)</th>
                 <th style="padding: 10px;">Capacity (Allowable)</th>
-                <th style="padding: 10px; text-align: center;">Safety Factor</th>
+                <th style="padding: 10px; text-align: center;">Safety Factor / Limits</th>
                 <th style="padding: 10px; text-align: center;">Status</th>
             </tr>
         </thead>
@@ -3144,6 +3563,13 @@ if enable_pile:
                 <td style="padding: 10px; text-align: center;">{status_span(pile_pass_toe_interaction)}</td>
             </tr>
             <tr style="border-bottom: 1px solid #eef1f6;">
+                <td style="padding: 10px; font-weight: bold;">Toe Pile Settlement (Axial openpile)</td>
+                <td style="padding: 10px; font-family: monospace;">{settlement_toe_pile:.2f} mm</td>
+                <td style="padding: 10px; font-family: monospace;">{allowable_pile_settlement_mm:.1f} mm</td>
+                <td style="padding: 10px; text-align: center; font-family: monospace;">2% Diameter</td>
+                <td style="padding: 10px; text-align: center;">{status_span(pile_pass_toe_settlement)}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #eef1f6;">
                 <td style="padding: 10px; font-weight: bold;">Heel Pile Axial ({"Compression" if P_heel >= 0 else "Tension"})</td>
                 <td style="padding: 10px; font-family: monospace;">{abs(P_heel):.2f} kN</td>
                 <td style="padding: 10px; font-family: monospace;">{Q_comp_allow if P_heel >= 0 else Q_tens_allow:.2f} kN</td>
@@ -3163,6 +3589,13 @@ if enable_pile:
                 <td style="padding: 10px; font-family: monospace;">Interaction Envelope</td>
                 <td style="padding: 10px; text-align: center; font-family: monospace;">-</td>
                 <td style="padding: 10px; text-align: center;">{status_span(pile_pass_heel_interaction)}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #eef1f6;">
+                <td style="padding: 10px; font-weight: bold;">Heel Pile Settlement (Axial openpile)</td>
+                <td style="padding: 10px; font-family: monospace;">{settlement_heel_pile:.2f} mm</td>
+                <td style="padding: 10px; font-family: monospace;">{allowable_pile_settlement_mm:.1f} mm</td>
+                <td style="padding: 10px; text-align: center; font-family: monospace;">2% Diameter</td>
+                <td style="padding: 10px; text-align: center;">{status_span(pile_pass_heel_settlement)}</td>
             </tr>
         </tbody>
     </table>
