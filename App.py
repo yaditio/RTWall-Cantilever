@@ -155,6 +155,13 @@ with tab_geom:
     top_wall = st.number_input('Top wall thickness (m)', value=0.3, step=0.01, format="%.3f")
     bot_wall = st.number_input('Bottom wall thickness (m)', value=0.4, step=0.01, format="%.3f")
     h_ftg = st.number_input('Footing thickness (m)', value=0.3, step=0.01, format="%.3f")
+    # Shear key optional parameters
+    include_shear_key = st.checkbox('Include Shear Key', value=False)
+    if include_shear_key:
+        st.subheader('Shear Key Parameters')
+        shear_key_distance = st.number_input('Distance from toe edge (m)', value=0.1, step=0.01, format="%.3f")
+        shear_key_width = st.number_input('Shear key width (m)', value=0.5, step=0.01, format="%.3f")
+        shear_key_thickness = st.number_input('Shear key thickness (m)', value=0.2, step=0.01, format="%.3f")
 
 with tab_soil:
     # Soil parameters
@@ -391,6 +398,7 @@ for idx, x in enumerate(xs_unique):
 # back nodes follow the tapered profile, front nodes at x = toe+bot_wall
 # IDs 17..32 (back1,front1, back2,front2, ...)
 stem_pairs = []
+shear_node_ids = []  # will hold shear key node ids if enabled
 for i in range(1, 9):
     z = h_ftg + Hw * (i / 8.0)
     back_x = toe + taper * (i / 8.0)
@@ -462,8 +470,71 @@ for j in range(1, 9):
         elem_id += 1
     stem_elements_by_layer.append([e1, e2])
 
+# Shear key mesh (Tri31 3x3 grid) if enabled
+if include_shear_key:
+    # Shear key protrudes BELOW the footing base (y=0 downward)
+    # x range: from shear_key_distance to shear_key_distance + shear_key_width
+    base_node_id = num_foot_nodes * 2 + len(stem_pairs) * 2
+    shear_node_ids = []
+    shear_key_top_nids = []     # top row (y=0) for equalDOF connection
+    shear_key_bottom_nids = []  # bottom row (y=-shear_key_thickness) for springs
+    shear_key_left_nids = []    # left column for active pressure
+    shear_key_right_nids = []   # right column for passive pressure
+    nx_sk, ny_sk = 3, 3
+    x_start_sk = shear_key_distance
+    x_end_sk = shear_key_distance + shear_key_width
+    y_top_sk = 0.0              # footing base level
+    y_bottom_sk = -shear_key_thickness
+    sk_xs = []
+    for i_sk in range(nx_sk):
+        x = x_start_sk + (x_end_sk - x_start_sk) * i_sk / (nx_sk - 1)
+        sk_xs.append(x)
+        for j_sk in range(ny_sk):
+            y = y_bottom_sk + (y_top_sk - y_bottom_sk) * j_sk / (ny_sk - 1)
+            nid = base_node_id + len(shear_node_ids) + 1
+            ops.node(nid, float(x), float(y))
+            shear_node_ids.append(nid)
+            if j_sk == ny_sk - 1:  # top row
+                shear_key_top_nids.append(nid)
+            if j_sk == 0:  # bottom row
+                shear_key_bottom_nids.append(nid)
+            if i_sk == 0:  # left column (back face — active side)
+                shear_key_left_nids.append(nid)
+            if i_sk == nx_sk - 1:  # right column (front face — passive side)
+                shear_key_right_nids.append(nid)
+    sk_ys_unique = [y_bottom_sk + (y_top_sk - y_bottom_sk) * j_sk / (ny_sk - 1) for j_sk in range(ny_sk)]
+
+    # Create Tri31 elements for the shear key (2 triangles per quad)
+    shear_key_elem_ids = []
+    for i_sk in range(nx_sk - 1):
+        for j_sk in range(ny_sk - 1):
+            n1 = shear_node_ids[i_sk * ny_sk + j_sk]
+            n2 = shear_node_ids[(i_sk + 1) * ny_sk + j_sk]
+            n3 = shear_node_ids[i_sk * ny_sk + (j_sk + 1)]
+            n4 = shear_node_ids[(i_sk + 1) * ny_sk + (j_sk + 1)]
+            ops.element('Tri31', elem_id, n1, n4, n3, 1.0, 'PlaneStrain', 1)
+            shear_key_elem_ids.append(elem_id)
+            elem_id += 1
+            ops.element('Tri31', elem_id, n1, n2, n4, 1.0, 'PlaneStrain', 1)
+            shear_key_elem_ids.append(elem_id)
+            elem_id += 1
+
+    # Connect top row of shear key to nearest footing bottom nodes via equalDOF
+    for sk_top_nid in shear_key_top_nids:
+        sk_x = ops.nodeCoord(sk_top_nid, 1)
+        # Find closest bottom footing node
+        best_dist = float('inf')
+        best_nid = bottom_node_ids[0]
+        for bnid in bottom_node_ids:
+            bx = ops.nodeCoord(bnid, 1)
+            dist = abs(bx - sk_x)
+            if dist < best_dist:
+                best_dist = dist
+                best_nid = bnid
+        ops.equalDOF(best_nid, sk_top_nid, 1, 2)
+
 # total nodes and elements
-total_nodes = num_foot_nodes * 2 + len(stem_pairs) * 2
+total_nodes = num_foot_nodes * 2 + len(stem_pairs) * 2 + (len(shear_node_ids) if include_shear_key else 0)
 total_elements = elem_id - 1
 
 # heel_nodes kept for reference (top-of-footing sampling points)
@@ -755,6 +826,35 @@ ops.load(bottom_node_ids[0], float(F_passive_bot), 0.0)
 # Total passive force (integrated)
 P_passive = 0.5 * (sigma_p_top + sigma_p_bot) * h_ftg * t
 
+# Shear key active and passive earth pressure loads
+P_passive_shear_key = 0.0
+if include_shear_key:
+    # The shear key extends from y=0 to y=-shear_key_thickness below footing base
+    # Depth below ground surface at footing base = h_soil_toe + h_ftg
+    depth_at_ftg_base = h_soil_toe + h_ftg
+    # Left face (back side, closer to heel) receives ACTIVE pressure pushing left (negative x)
+    # Right face (front side, closer to toe) receives PASSIVE pressure pushing right (positive x)
+    sk_ny = len(shear_key_left_nids)
+    sk_h_trib = shear_key_thickness / max(1, sk_ny - 1)
+    for j_sk, (left_nid, right_nid) in enumerate(zip(shear_key_left_nids, shear_key_right_nids)):
+        y_nid = ops.nodeCoord(left_nid, 2)  # y coordinate (negative)
+        depth_below_surface = depth_at_ftg_base + abs(y_nid)
+        # Tributary height
+        if j_sk == 0 or j_sk == sk_ny - 1:
+            h_t = sk_h_trib / 2.0
+        else:
+            h_t = sk_h_trib
+        # Active pressure on left face (pushing left = negative x)
+        sigma_a = Ka * gamma_soil_dry * depth_below_surface
+        F_active = -sigma_a * h_t * t
+        ops.load(left_nid, float(F_active), 0.0)
+        # Passive pressure on right face (pushing right = positive x) with FS
+        sigma_p = (Kp * gamma_soil_dry * depth_below_surface) / FS_passive
+        F_passive_sk = sigma_p * h_t * t
+        ops.load(right_nid, float(F_passive_sk), 0.0)
+        P_passive_shear_key += F_passive_sk
+    P_passive += P_passive_shear_key
+
 # Support information - Winkler Soil Spring Model
 # Compute subgrade reaction modulus using Vesic's formula: ks = Es / (B * (1 - nu^2))
 ks_subgrade = Es_soil / (ftg * (1.0 - nu_soil**2))
@@ -788,9 +888,30 @@ for idx, nid in enumerate(bottom_node_ids):
 leftmost_bottom = bottom_node_ids[0]
 ops.fix(leftmost_bottom, 1, 0)
 
+# Shear key bottom node springs (anchor + vertical spring)
+if include_shear_key:
+    sk_spring_mat_base = 300  # material tag offset for shear key springs
+    sk_spring_elem_base = 2000  # element tag offset for shear key springs
+    sk_anchor_base = 400  # node tag offset for shear key anchor nodes
+    for idx_sk, sk_nid in enumerate(shear_key_bottom_nids):
+        anchor_sk_nid = sk_anchor_base + idx_sk
+        x_c = ops.nodeCoord(sk_nid, 1)
+        y_c = ops.nodeCoord(sk_nid, 2)
+        ops.node(anchor_sk_nid, float(x_c), float(y_c))
+        ops.fix(anchor_sk_nid, 1, 1)
+        # Tributary width for spring
+        L_trib_sk = shear_key_width / max(1, len(shear_key_bottom_nids) - 1)
+        if idx_sk == 0 or idx_sk == len(shear_key_bottom_nids) - 1:
+            L_trib_sk = L_trib_sk / 2.0
+        k_spring_sk = ks_subgrade * L_trib_sk * t
+        mat_sk = sk_spring_mat_base + idx_sk
+        ops.uniaxialMaterial('Elastic', mat_sk, float(k_spring_sk))
+        elem_sk = sk_spring_elem_base + idx_sk
+        ops.element('zeroLength', elem_sk, anchor_sk_nid, sk_nid, '-mat', mat_sk, '-dir', 2)
+
 ops.system('BandSPD')
 ops.numberer('RCM')
-ops.constraints('Plain')
+ops.constraints('Transformation')
 ops.integrator('LoadControl', 1.0)
 
 # Analysis type
@@ -923,6 +1044,12 @@ W_stem_tri = gamma_c * stem_tri_area * t
 cg_x_stem_tri = toe + (2.0 / 3.0) * taper if taper > 0 else float(toe)
 
 W_conc = W_base + W_stem_rect + W_stem_tri
+# Add shear key weight if enabled
+W_shear_key = 0.0
+if include_shear_key:
+    shear_key_area = shear_key_width * shear_key_thickness
+    W_shear_key = gamma_c * shear_key_area * t
+    W_conc += W_shear_key
 wall_area = stem_rect_area + stem_tri_area
 footing_area = base_area
 
@@ -983,13 +1110,13 @@ except Exception:
 
 try:
     phi_rad = np.radians(phi)
-    # R_slide is the base friction resistance (W * tan(phi))
-    R_slide = max(0.0, W_down_global) * np.tan(phi_rad)
+    # R_slide is the base friction resistance (W * tan(phi)) + shear key passive resistance
+    R_slide = max(0.0, W_down_global) * np.tan(phi_rad) + P_passive_shear_key
     # F_drive is the net driving lateral force (Active + Surcharge + Hydrostatic - Passive)
     # Since passive resistance is applied in OpenSees as a positive horizontal load,
     # total_lateral_resultant (-sum(Fx)) naturally subtracts it.
     F_drive = max(0.0, total_lateral_resultant)
-    FS_slide_global = R_slide / F_drive if F_drive > 0 else float('inf')
+    FS_slide_global = (R_slide + P_passive) / F_drive if F_drive > 0 else float('inf')
 except Exception:
     R_slide = 0.0
     FS_slide_global = None
@@ -1257,17 +1384,19 @@ try:
         anchor=(stem_cover, stem_beam_height - stem_cover),
     )
     
-    # Side bars
-    geom_stem = add_bar_rectangular_array(
-        geometry=geom_stem,
-        area=stem_sidebar_area,
-        material=material_steel,
-        n_x=2,
-        x_s=stem_beam_width - 2 * stem_cover,
-        n_y=3,
-        y_s=stem_spacing_y,
-        anchor=(stem_cover, stem_cover + 150),
-    )
+    # Side bars (evenly spaced between top and bottom main bars, avoiding out-of-bounds/overlap)
+    n_y_stem = int((stem_beam_height - 2 * stem_cover - 1e-3) / stem_spacing_y)
+    if n_y_stem > 0:
+        geom_stem = add_bar_rectangular_array(
+            geometry=geom_stem,
+            area=stem_sidebar_area,
+            material=material_steel,
+            n_x=2,
+            x_s=stem_beam_width - 2 * stem_cover,
+            n_y=n_y_stem,
+            y_s=stem_spacing_y,
+            anchor=(stem_cover, stem_cover + stem_spacing_y),
+        )
     
     conc_sec_stem = ConcreteSection(geom_stem)
     stem_capacity_sag = conc_sec_stem.ultimate_bending_capacity(theta=0)
@@ -1317,17 +1446,19 @@ try:
         anchor=(ftg_cover, ftg_beam_height - ftg_cover),
     )
     
-    # Side bars
-    geom_ftg = add_bar_rectangular_array(
-        geometry=geom_ftg,
-        area=ftg_sidebar_area,
-        material=material_steel,
-        n_x=2,
-        x_s=ftg_beam_width - 2 * ftg_cover,
-        n_y=n_y_bars_ftg,
-        y_s=ftg_spacing_y,
-        anchor=(ftg_cover, ftg_cover),
-    )
+    # Side bars (evenly spaced between top and bottom main bars, avoiding out-of-bounds/overlap)
+    n_y_ftg = int((ftg_beam_height - 2 * ftg_cover - 1e-3) / ftg_spacing_y)
+    if n_y_ftg > 0:
+        geom_ftg = add_bar_rectangular_array(
+            geometry=geom_ftg,
+            area=ftg_sidebar_area,
+            material=material_steel,
+            n_x=2,
+            x_s=ftg_beam_width - 2 * ftg_cover,
+            n_y=n_y_ftg,
+            y_s=ftg_spacing_y,
+            anchor=(ftg_cover, ftg_cover + ftg_spacing_y),
+        )
     
     conc_sec_ftg = ConcreteSection(geom_ftg)
     ftg_capacity_sag = conc_sec_ftg.ultimate_bending_capacity(theta=0)
@@ -1648,8 +1779,19 @@ if enable_pile:
         d_piles = ftg - 2.0 * pile_offset
         P_toe = Rv_force * (ftg - pile_offset - x_R_loc) / d_piles
         P_heel = Rv_force * (x_R_loc - pile_offset) / d_piles
-        H_toe = H_force / 2.0
-        H_heel = H_force / 2.0
+        
+        # Lateral load on piles: use total active driving lateral force + seismic inertia force (neglecting passive resistance for conservative structural design of piles)
+        total_active_driving = -sum(Fx.values())
+        if kh > 0.0:
+            W_conc_seismic = gamma_c * ((top_wall + bot_wall) / 2.0 * Hw + ftg * h_ftg) * t
+            W_soil_seismic = (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * (Hwtr + h_ftg)) * ftg * t
+            seismic_force = kh * (W_soil_seismic + W_conc_seismic)
+        else:
+            seismic_force = 0.0
+        H_total_piles = max(0.1, total_active_driving + seismic_force)
+        
+        H_toe = H_total_piles / 2.0
+        H_heel = H_total_piles / 2.0
 
         # 3. Single pile capacities (using groundhog)
         gamma_sub = gamma_pile_soil - gamma_w if (Hwtr_front > 0 or Hwtr > 0) else gamma_pile_soil
@@ -2015,7 +2157,13 @@ with col_left:
             mult = 1000
             # Dynamically compute drawing height to prevent clipping when soil or water is high
             max_height = max(Hw, h_soil, h_soil_toe, Hwtr, Hwtr_front) + h_ftg
+            if include_shear_key:
+                max_height += shear_key_thickness
             d = draw.Drawing((ftg + 1.8)*mult, (max_height + 2.8)*mult, origin='bottom-left')
+            if include_shear_key:
+                min_y = -(max_height + 2.8) * mult
+                max_y = (shear_key_thickness + 0.3) * mult
+                d.view_box = (0, min_y, (ftg + 1.8)*mult, max_y - min_y)
             
             # Draw soil - Dry soil (above water table)
             if h_soil > Hwtr:
@@ -2082,6 +2230,25 @@ with col_left:
                             fill='#eeee00',
                             stroke='black',
                             stroke_width=50))
+
+            # Draw Shear Key (below footing base)
+            if include_shear_key:
+                sk_x1 = shear_key_distance * mult
+                sk_x2 = (shear_key_distance + shear_key_width) * mult
+                sk_y1 = 0.0   # footing base level
+                sk_y2 = shear_key_thickness * mult  # extends downward (positive in drawing coords)
+                d.append(draw.Lines(sk_x1, sk_y1,
+                                    sk_x2, sk_y1,
+                                    sk_x2, sk_y2,
+                                    sk_x1, sk_y2,
+                                    close=True,
+                                    fill='#FFD700',
+                                    stroke='black',
+                                    stroke_width=30))
+                # Label
+                d.append(draw.Text('Shear Key', 0.15*mult,
+                                   (sk_x1 + sk_x2) / 2, sk_y2 + 0.12*mult,
+                                   fill='black', text_anchor='middle', font_weight='bold'))
 
             # Vertical dimensions
             x_dim_v1 = (ftg + 0.3) * mult
@@ -2525,6 +2692,21 @@ with col_left:
                                 fill='#eeee00',
                                 stroke='black',
                                 stroke_width=30))
+
+            # Draw Shear Key in d_load if enabled
+            if include_shear_key:
+                sk_x1 = shear_key_distance * mult + x_shift
+                sk_x2 = (shear_key_distance + shear_key_width) * mult + x_shift
+                sk_y1 = -y_shift
+                sk_y2 = -y_shift + shear_key_thickness * mult
+                d_load.append(draw.Lines(sk_x1, sk_y1,
+                                    sk_x2, sk_y1,
+                                    sk_x2, sk_y2,
+                                    sk_x1, sk_y2,
+                                    close=True,
+                                    fill='#FFD700',
+                                    stroke='black',
+                                    stroke_width=20))
 
             # 3. Dynamic loads
             if selected_load_plot in ['soil lateral', 'total']:
@@ -3006,6 +3188,15 @@ with col_right:
         except Exception:
             pass
 
+    # Remove shear key spring elements and anchor nodes for clean opsvis plotting
+    if include_shear_key:
+        for idx_sk in range(len(shear_key_bottom_nids)):
+            try:
+                ops.remove('element', sk_spring_elem_base + idx_sk)
+                ops.remove('node', sk_anchor_base + idx_sk)
+            except Exception:
+                pass
+
     # Card C: Stem Bending Moment Diagram
     with st.container(border=True):
         st.subheader("📉 Stem Bending Moment Diagram")
@@ -3013,12 +3204,14 @@ with col_right:
         
         try:
             node_moments_dict = get_stem_moments()
-            nds_val_moment = np.zeros(total_nodes)
-            for i in range(1, total_nodes + 1):
-                if i in node_moments_dict:
-                    nds_val_moment[i-1] = node_moments_dict[i]
+            # Use actual node tags from current model state (after anchor removal)
+            active_node_tags = ops.getNodeTags()
+            nds_val_moment = np.zeros(len(active_node_tags))
+            for idx_nd, ntag in enumerate(active_node_tags):
+                if ntag in node_moments_dict:
+                    nds_val_moment[idx_nd] = node_moments_dict[ntag]
                 else:
-                    nds_val_moment[i-1] = 0.0
+                    nds_val_moment[idx_nd] = 0.0
             
             plt.close('all')
             opsv.plot_stress_2d(nds_val_moment)
