@@ -20,3 +20,8 @@ venv.bak/
 # Backups and junk files moved outside
 backups/
 *backup*.py
+
+# PyInstaller build directories and standalone executables
+build/
+dist/
+*.exe

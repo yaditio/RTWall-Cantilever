@@ -65,6 +65,27 @@ If you do not have Anaconda installed, download it from the [Official Anaconda W
    streamlit run App.py
    ```
 
+### 📦 Standalone Desktop Executable (.exe)
+
+The application can be compiled and run as a standalone, portable Windows executable (`.exe`), which bundles the Python environment, core libraries (including the OpenSees finite element solver), and Cairo rendering engine.
+
+#### 1. Running the Executable
+- Download the precompiled `RTWallCantilever.exe` from the **Releases** section of this repository.
+- Double-click the downloaded executable to run it. A console window will open, start the local server, and automatically open your default web browser to the application page at `http://localhost:8501`.
+
+#### 2. Re-compiling the Executable
+If you modify `App.py` and wish to rebuild the portable executable:
+1. Activate the Python 3.10 environment.
+2. Install PyInstaller (if not already installed):
+   ```bash
+   pip install pyinstaller
+   ```
+3. Compile using the provided specification file:
+   ```bash
+   pyinstaller --clean --noconfirm RTWallCantilever.spec
+   ```
+   The output executable will be created/updated in the `dist/` folder.
+
 ---
 
 ## 🐳 Docker Deployment
