@@ -178,6 +178,7 @@ with tab_soil:
         offset_surcharge = 0.0
     h_soil = st.number_input('Soil height above heel (m)', value=3.0, step=0.01, format="%.3f")
     h_soil_toe = st.number_input('Soil above toe (m)', value=1.0, step=0.01, format="%.3f")
+    c_soil = st.number_input('Soil cohesion for slope stability (kPa)', value=10.0, step=1.0, format="%.1f")
 
     # Water parameters
     gamma_w = st.number_input('Water unit weight (kN/m3)', value=9.81, step=0.01, format="%.2f")
@@ -1703,6 +1704,374 @@ settlement_heel_pile = 0.0
 allowable_pile_settlement_mm = 0.0
 fig_pile_sec = None
 
+def run_1d_stem_beam_analysis(Hw, top_wall, bot_wall, h_ftg, Ec, h_soil, h_soil_toe,
+                               gamma_soil_dry, gamma_soil_wet, phi, q, surcharge_type,
+                               width_surcharge, offset_surcharge, Hwtr, Hwtr_front,
+                               gamma_w, kh, gamma_c):
+    import subprocess
+    import sys
+    import json
+
+    subprocess_code = f"""
+import openseespy.opensees as ops
+import numpy as np
+import json
+
+def stresses_stripload_retainingwall_local(imposedstress, width, offset, toe_depth, depth):
+    H0 = max(1e-5, float(toe_depth))
+    z = max(1e-5, float(depth))
+    a = float(offset)
+    B = float(width)
+    
+    alpha_rad = np.arctan(a / z)
+    alpha_far_rad = np.arctan((a + B) / z)
+    beta_rad = alpha_far_rad - alpha_rad
+    alpha_bisector_rad = alpha_rad + beta_rad / 2.0
+    
+    _delta_sigma_x = (2.0 * imposedstress / np.pi) * (
+        beta_rad - np.sin(beta_rad) * np.cos(2.0 * alpha_bisector_rad)
+    )
+    return {{
+        'delta sigma x [kPa]': _delta_sigma_x
+    }}
+
+# Input arguments passed from main script
+Hw = {Hw}
+top_wall = {top_wall}
+bot_wall = {bot_wall}
+h_ftg = {h_ftg}
+Ec = {Ec}
+h_soil = {h_soil}
+h_soil_toe = {h_soil_toe}
+gamma_soil_dry = {gamma_soil_dry}
+gamma_soil_wet = {gamma_soil_wet}
+phi = {phi}
+q = {q}
+surcharge_type = {repr(surcharge_type)}
+width_surcharge = {width_surcharge}
+offset_surcharge = {offset_surcharge}
+Hwtr = {Hwtr}
+Hwtr_front = {Hwtr_front}
+gamma_w = {gamma_w}
+kh = {kh}
+gamma_c = {gamma_c}
+
+ops.wipe()
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+
+# 9 nodes from y = 0.0 to y = Hw
+n_steps = 8
+ys = np.linspace(0.0, Hw, n_steps + 1)
+for i, y in enumerate(ys, 1):
+    ops.node(i, 0.0, float(y))
+
+# Boundary condition: base fixed
+ops.fix(1, 1, 1, 1)
+
+# Materials and sections
+h_avg = (top_wall + bot_wall) / 2.0
+A = h_avg
+I = (h_avg ** 3) / 12.0
+
+ops.geomTransf('Linear', 1)
+for i in range(1, n_steps + 1):
+    ops.element('elasticBeamColumn', i, i, i + 1, A, Ec, I, 1)
+
+# Pressures and forces
+Ka = np.tan(np.radians(45.0 - phi / 2.0)) ** 2
+Kp = np.tan(np.radians(45.0 + phi / 2.0)) ** 2
+
+ops.timeSeries('Linear', 1)
+ops.pattern('Plain', 1, 1)
+
+# Front soil height relative to stem base
+h_front_soil_stem = max(0.0, h_soil_toe - h_ftg)
+# Front water height relative to stem base
+h_wtr_front_stem = max(0.0, Hwtr_front - h_ftg)
+
+for i, z in enumerate(ys, 1):
+    # Tributary height
+    if i == 1 or i == n_steps + 1:
+        h_trib = Hw / (2.0 * n_steps)
+    else:
+        h_trib = Hw / n_steps
+        
+    # 1. Active Pressure (Rear)
+    if z <= h_soil:
+        h_dry_z = max(0.0, h_soil - max(z, Hwtr))
+        h_wet_z = max(0.0, min(h_soil, Hwtr) - z)
+        sigma_soil = Ka * (gamma_soil_dry * h_dry_z + gamma_soil_wet * h_wet_z)
+        
+        if surcharge_type == 'Strip Load':
+            depth_below_surface = max(1e-5, h_soil - z)
+            sigma_q = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, depth_below_surface)['delta sigma x [kPa]']
+        else:
+            sigma_q = Ka * q
+            
+        if z <= Hwtr:
+            sigma_w = gamma_w * (Hwtr - z)
+        else:
+            sigma_w = 0.0
+            
+        p_active = sigma_soil + sigma_q + sigma_w
+    else:
+        p_active = 0.0
+        
+    # 2. Passive Pressure (Front)
+    if z <= h_front_soil_stem:
+        d_front = h_front_soil_stem - z
+        sigma_passive = Kp * gamma_soil_dry * d_front # assuming dry soil above toe
+        
+        if z <= h_wtr_front_stem:
+            sigma_w_front = gamma_w * (h_wtr_front_stem - z)
+        else:
+            sigma_w_front = 0.0
+            
+        p_passive = sigma_passive + sigma_w_front
+    else:
+        p_passive = 0.0
+        
+    # Net lateral pressure (pushing right, positive x)
+    p_net = p_passive - p_active
+    F_lat = p_net * h_trib
+    
+    # 3. Concrete Self-Weight and Seismic
+    thickness_z = bot_wall - (bot_wall - top_wall) * (z / Hw)
+    W_c = gamma_c * thickness_z * h_trib
+    F_vert = -W_c
+    F_seismic = -kh * W_c  # pushes left (negative x)
+    
+    # Apply loads
+    ops.load(i, float(F_lat + F_seismic), float(F_vert), 0.0)
+
+# Run static analysis
+ops.system('BandSPD')
+ops.numberer('RCM')
+ops.constraints('Plain')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+ok = ops.analyze(1)
+
+# Extract results
+disps = []
+shears = []
+moments = []
+for i in range(1, n_steps + 2):
+    disps.append(ops.nodeDisp(i, 1))
+
+for i in range(1, n_steps + 1):
+    forces = ops.eleForce(i)
+    shears.append(forces[1])
+    moments.append(forces[2])
+# Append last element forces
+forces_last = ops.eleForce(n_steps)
+shears.append(-forces_last[4])
+moments.append(-forces_last[5])
+
+results = {{
+    "ok": int(ok),
+    "ys": list(ys),
+    "disps": disps,
+    "shears": shears,
+    "moments": moments
+}}
+print(json.dumps(results))
+"""
+
+    try:
+        res = subprocess.run([sys.executable, '-c', subprocess_code], capture_output=True, text=True)
+        if res.returncode == 0:
+            data = json.loads(res.stdout.strip().split('\\n')[-1])
+            return data
+        else:
+            print("Subprocess failed inside run_1d_stem_beam_analysis:", res.stderr)
+            return None
+    except Exception as e:
+        print("Error during run_1d_stem_beam_analysis execution:", e)
+        return None
+
+def run_2d_ssrm_analysis(toe, heel, bot_wall, top_wall, h_ftg, Hw, h_soil, h_soil_toe,
+                         gamma_soil_dry, gamma_soil_wet, phi, q, surcharge_type,
+                         width_surcharge, offset_surcharge, Hwtr, Hwtr_front,
+                         gamma_w, kh, gamma_c, c_soil, Ec):
+    import subprocess
+    import sys
+    import pickle
+    import os
+
+    scratch_dir = r"C:\Users\tio\.gemini\antigravity-ide\brain\6c2db595-eff5-4bf2-92ad-16886f7bcd01\scratch"
+    if not os.path.exists(scratch_dir):
+        os.makedirs(scratch_dir)
+        
+    pickle_path = os.path.join(scratch_dir, "ssrm_results.pkl")
+    pickle_path_escaped = pickle_path.replace("\\", "\\\\")
+
+    subprocess_code = f"""
+import openseespy.opensees as ops
+import numpy as np
+import pickle
+import xslope
+from xslope.mesh import build_mesh_from_polygons
+from xslope.fem import build_fem_data, solve_ssrm
+
+# Geometry parameters
+toe = {toe}
+heel = {heel}
+bot_wall = {bot_wall}
+top_wall = {top_wall}
+h_ftg = {h_ftg}
+Hw = {Hw}
+h_soil = {h_soil}
+h_soil_toe = {h_soil_toe}
+
+ftg_w = toe + heel + bot_wall
+y_lower = h_soil_toe
+y_upper = h_ftg + h_soil
+y_bottom = -5.0
+
+# Vertical cut at x_cut (front face of stem)
+x_cut = toe
+
+# Beam slightly inside the retained soil so it couples to the mesh
+pile_x = x_cut + 0.05
+
+# Soil polygon: vertical cut at x_cut
+soil_poly = [
+    (-10.0, y_bottom),
+    (ftg_w + 15.0, y_bottom),
+    (ftg_w + 15.0, y_upper),
+    (x_cut, y_upper),
+    (x_cut, y_lower),
+    (-10.0, y_lower),
+    (-10.0, y_bottom)
+]
+polygons = [{{"coords": soil_poly, "mat_id": 0}}]
+
+# Stem wall beam: from footing top to soil top
+stem_base_y = h_ftg
+stem_top_y = y_upper
+pile_lines = [[(pile_x, stem_base_y), (pile_x, stem_top_y)]]
+
+# Mesh
+mesh = build_mesh_from_polygons(
+    polygons=polygons,
+    target_size=1.2,
+    element_type='quad8',
+    lines=pile_lines
+)
+
+# Surcharge behind the wall
+q_val = {q}
+dloads = [
+    {{
+        "coords": [(x_cut + 0.3, y_upper), (ftg_w + 15.0, y_upper)],
+        "loads": [q_val, q_val]
+    }}
+]
+
+# Average stem thickness for the beam section
+t_beam = (top_wall + bot_wall) / 2.0
+E_conc = {Ec}
+
+slope_data = {{
+    "materials": [
+        {{
+            "c": {c_soil},
+            "phi": {phi},
+            "gamma": {gamma_soil_dry},
+            "E": 20000.0,
+            "nu": 0.3,
+            "pp_option": "none"
+        }}
+    ],
+    "pile_lines": [
+        {{
+            "x1": pile_x, "y1": stem_base_y, "x2": pile_x, "y2": stem_top_y,
+            "E": E_conc,
+            "D_pile": t_beam,
+            "S": 1.0,
+            "fixity": "fixed",
+            "V_cap": 1000.0,
+            "M_cap": 1000.0
+        }}
+    ],
+    "dloads": dloads,
+    "gamma_water": {gamma_w},
+    "k_seismic": {kh},
+    "max_depth": y_bottom
+}}
+
+fem_data = build_fem_data(slope_data, mesh=mesh)
+
+# Fix bottom tip node of the stem beam
+nodes = fem_data['nodes']
+pile_node_pairs = fem_data['pile_node_pairs']
+pile_line_idx_by_pile_elem = fem_data['pile_line_idx_by_pile_elem']
+
+pile_tip_nodes = []
+for pl_idx in range(len(slope_data['pile_lines'])):
+    pile_nodes_for_line = set()
+    for p_idx in range(len(pile_node_pairs)):
+        if pile_line_idx_by_pile_elem[p_idx] == pl_idx:
+            n0, n1 = pile_node_pairs[p_idx]
+            pile_nodes_for_line.add(n0)
+            pile_nodes_for_line.add(n1)
+    if pile_nodes_for_line:
+        bottom_node = min(pile_nodes_for_line, key=lambda nd: nodes[nd, 1])
+        pile_tip_nodes.append(bottom_node)
+
+fem_data['pile_head_nodes'] = np.append(fem_data['pile_head_nodes'], pile_tip_nodes)
+fem_data['pile_head_fixed'] = np.append(fem_data['pile_head_fixed'], [True] * len(pile_tip_nodes))
+
+for tip_node in pile_tip_nodes:
+    fem_data['bc_type'][tip_node] = 1
+
+# Solve SSRM
+res = solve_ssrm(fem_data, F_min=0.3, F_max=3.0, tolerance=0.05, debug_level=0, dt_scale=5.0, failure_criterion="displacement_increase")
+
+# Save result dict to pickle file
+result_dict = {{
+    "FS": res['FS'],
+    "fem_data": fem_data,
+    "last_solution": res.get('last_solution', None)
+}}
+
+with open("{pickle_path_escaped}", "wb") as f:
+    pickle.dump(result_dict, f)
+
+print("SUCCESS_DONE")
+"""
+
+    try:
+        res = subprocess.run([sys.executable, '-c', subprocess_code], capture_output=True, text=True)
+        if res.returncode == 0 and "SUCCESS_DONE" in res.stdout:
+            with open(pickle_path, 'rb') as f:
+                data = pickle.load(f)
+            return data
+        else:
+            print("Subprocess failed inside run_2d_ssrm_analysis:", res.stderr)
+            return None
+    except Exception as e:
+        print("Error during run_2d_ssrm_analysis execution:", e)
+        return None
+
+@st.cache_data
+def get_cached_ssrm_results(toe, heel, bot_wall, top_wall, h_ftg, Hw, h_soil, h_soil_toe,
+                            gamma_soil_dry, gamma_soil_wet, phi, q, surcharge_type,
+                            width_surcharge, offset_surcharge, Hwtr, Hwtr_front,
+                            gamma_w, kh, gamma_c, c_soil, Ec):
+    return run_2d_ssrm_analysis(
+        toe=toe, heel=heel, bot_wall=bot_wall, top_wall=top_wall, h_ftg=h_ftg, Hw=Hw,
+        h_soil=h_soil, h_soil_toe=h_soil_toe,
+        gamma_soil_dry=gamma_soil_dry, gamma_soil_wet=gamma_soil_wet, phi=phi, q=q,
+        surcharge_type=surcharge_type, width_surcharge=width_surcharge, offset_surcharge=offset_surcharge,
+        Hwtr=Hwtr, Hwtr_front=Hwtr_front, gamma_w=gamma_w, kh=kh, gamma_c=gamma_c,
+        c_soil=c_soil, Ec=Ec
+    )
+
+ssrm_results = None
+
+
 if enable_pile:
     try:
         from openpile.construct import PileSection, Pile, SoilProfile, Layer, Model
@@ -2029,8 +2398,49 @@ if enable_pile:
         st.code(traceback.format_exc())
 
 # =========================================================
+# GLOBAL STABILITY ANALYSIS (always runs)
+# =========================================================
+try:
+    # 2D SSRM Slope Stability Analysis
+    ssrm_results = get_cached_ssrm_results(
+        toe=toe,
+        heel=heel,
+        bot_wall=bot_wall,
+        top_wall=top_wall,
+        h_ftg=h_ftg,
+        Hw=Hw,
+        h_soil=h_soil,
+        h_soil_toe=h_soil_toe,
+        gamma_soil_dry=gamma_soil_dry,
+        gamma_soil_wet=gamma_soil_wet,
+        phi=phi,
+        q=q,
+        surcharge_type=surcharge_type,
+        width_surcharge=width_surcharge,
+        offset_surcharge=offset_surcharge,
+        Hwtr=Hwtr,
+        Hwtr_front=Hwtr_front,
+        gamma_w=gamma_w,
+        kh=PGA * FPGA,
+        gamma_c=gamma_c,
+        c_soil=c_soil,
+        Ec=Ec * 1000.0  # MPa to kPa
+    )
+
+except Exception as e:
+    st.error(f"Error during Global Stability Analysis: {e}")
+    import traceback
+    st.code(traceback.format_exc())
+
+# =========================================================
 # DASHBOARD UI RENDER
 # =========================================================
+
+def status_span(ok):
+    if ok:
+        return "<span style='background-color:#28a745; color:white; padding:3px 10px; border-radius:12px; font-weight:bold; font-size:12px;'>PASS</span>"
+    return "<span style='background-color:#dc3545; color:white; padding:3px 10px; border-radius:12px; font-weight:bold; font-size:12px;'>FAIL</span>"
+
 
 # 1. Title Banner
 st.markdown("""
@@ -3717,11 +4127,6 @@ if enable_pile:
     # Pile Foundation Report Cards
     st.subheader("📋 Pile Foundation Verification Report")
     
-    def status_span(ok):
-        if ok:
-            return "<span style='background-color:#28a745; color:white; padding:3px 10px; border-radius:12px; font-weight:bold; font-size:12px;'>PASS</span>"
-        return "<span style='background-color:#dc3545; color:white; padding:3px 10px; border-radius:12px; font-weight:bold; font-size:12px;'>FAIL</span>"
-        
     st.markdown(f"""
     <table style="width:100%; border-collapse: collapse; margin-bottom: 25px;">
         <thead>
@@ -3793,3 +4198,54 @@ if enable_pile:
         </tbody>
     </table>
     """, unsafe_allow_html=True)
+
+if ssrm_results is not None:
+    st.markdown("---")
+    with st.container(border=True):
+        st.subheader("🧱 Global Stability Analysis (2D SSRM)")
+        st.markdown(
+            '<div class="section-desc">Global slope stability analysis using 2D Strength Reduction Method (SRM) with OpenSeesPy (Griffiths & Lane 1999 displacement catastrophe method).</div>',
+            unsafe_allow_html=True
+        )
+        fs_ssrm = ssrm_results.get('FS', None)
+        
+        # Check status
+        is_seismic = (PGA * FPGA) > 0
+        req_fs = 1.1 if is_seismic else 1.5
+        
+        if fs_ssrm is None:
+            fs_str = "> 3.000"
+            ssrm_pass = True
+            fs_delta_str = f"Req >= {req_fs}"
+        else:
+            fs_str = f"{fs_ssrm:.3f}"
+            ssrm_pass = fs_ssrm >= req_fs
+            fs_delta_str = f"Req >= {req_fs}"
+        
+        # Display metric and badge
+        col_m1, col_m2 = st.columns([1, 2])
+        with col_m1:
+            st.metric(
+                label="Factor of Safety (FS)",
+                value=fs_str,
+                delta=fs_delta_str,
+                delta_color="normal" if ssrm_pass else "inverse"
+            )
+        with col_m2:
+            st.markdown(f"<div style='margin-top: 25px;'>Status: {status_span(ssrm_pass)}</div>", unsafe_allow_html=True)
+        
+        # Plot
+        try:
+            from xslope.plot_fem import plot_shear_strain_contours
+            fig_ssrm, ax = plt.subplots(1, 1, figsize=(10, 4))
+            
+            # Shear Strain Contour (failure surface)
+            plot_shear_strain_contours(ax, ssrm_results['fem_data'], ssrm_results['last_solution'], show_mesh=True)
+            ax.set_title(f"Viscoplastic Shear Strain (Failure Surface) (F={fs_str})", fontsize=11, fontweight='bold')
+            
+            fig_ssrm.tight_layout()
+            st.pyplot(fig_ssrm)
+            plt.close(fig_ssrm)
+        except Exception as e_ssrm:
+            st.error(f"Error plotting 2D SSRM: {e_ssrm}")
+        
