@@ -9,3 +9,6 @@ groundhog==0.15.0
 sectionproperties==3.5.0
 concreteproperties==0.6.4
 openpile==1.0.2
+xslope==0.1.54
+gmsh==4.15.2
+

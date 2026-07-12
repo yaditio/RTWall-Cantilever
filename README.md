@@ -20,6 +20,7 @@ This software is not a certified engineering design tool and should not be used 
 - **Geotechnical Surcharge**: Integrates strip loads or uniform surcharges using Boussinesq distributions.
 - **Seismic Analysis**: Automatically applies pseudo-static seismic loads ($k_h = \text{PGA} \times \text{FPGA}$) to OpenSees nodes.
 - **Concrete Strength Verification**: Section capacity check for Stem Wall, Footing Toe, and Footing Heel.
+- **Global Stability Analysis (2D SSRM)**: Evaluates the slope factor of safety (FS) using Finite Element Strength Reduction Method (SSRM) in `xslope` via the Griffiths & Lane (1999) displacement catastrophe sweep, displaying viscoplastic shear strain contour plots.
 - **Pile Foundation Design**:
   - Distributes total retaining wall axial demand and overturning moments into a 2-row pile system.
   - Generates pile cross-section plots and verifies bending-axial interaction envelopes using `concrete-properties`.
@@ -113,6 +114,8 @@ This application uses the following libraries:
 - [concreteproperties](https://concreteproperties.readthedocs.io/) — Concrete cross-section structural design verification.
 - [sectionproperties](https://sectionproperties.readthedocs.io/) — Structural section property calculations.
 - [openpile](https://github.com/pypile/openpile) — Winkler model implementation for lateral pile deflections.
+- [xslope](https://xslope.org/) — Geotechnical slope stability and finite element seepage solver.
+- [gmsh](https://gmsh.info/) — Three-dimensional finite element mesh generator.
 - [groundhog](https://groundhog.readthedocs.io/) — Geotechnical engineering calculator library.
 - [drawsvg](https://github.com/cduck/drawsvg) — SVG programmatic drawing generator.
 - [NumPy](https://numpy.org/) & [pandas](https://pandas.pydata.org/) — Data parsing and numerical matrices.
