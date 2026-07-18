@@ -2,6 +2,14 @@
 # Cantilever Retaining Wall
 # ----------------------------------------
 
+# Ensure conda Library/bin is in PATH for CairoSVG (and other libraries) on Windows
+import os
+import sys
+conda_prefix = getattr(sys, 'real_prefix', getattr(sys, 'base_prefix', sys.prefix))
+lib_bin = os.path.join(sys.prefix, 'Library', 'bin')
+if os.path.exists(lib_bin) and lib_bin not in os.environ['PATH']:
+    os.environ['PATH'] = lib_bin + os.path.pathsep + os.environ['PATH']
+
 # Importing necessary libraries
 import openseespy.opensees as ops
 import opsvis as opsv
@@ -98,8 +106,1684 @@ def stresses_stripload_retainingwall_local(imposedstress, width, offset, toe_dep
         'beta [deg]': np.degrees(beta_rad)
     }
 
+def generate_load_drawing(selected_load_plot):
+    mult = 1000
+    y_shift = 0.8 * mult
+    x_shift = 2.5 * mult
+    max_height = max(Hw, h_soil, h_soil_toe, Hwtr, Hwtr_front) + h_ftg
+    
+    # Calculate global max pressure to plot all load types proportionally
+    h_active = min(Hw, h_soil)
+    if surcharge_type == 'Strip Load':
+        q_top = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - h_active))['delta sigma x [kPa]'] if h_soil > 0 else 0.0
+        q_bot = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, h_soil)['delta sigma x [kPa]']
+    else:
+        q_top = Ka * q if h_soil > 0 else 0.0
+        q_bot = Ka * q if h_soil > 0 else 0.0
+    p_top_act = Ka * (gamma_soil_dry * max(0.0, h_soil - h_active)) + q_top if h_soil > 0 else 0.0
+    p_bot_act = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot if h_soil > 0 else 0.0
+
+    FS_passive_val = 2.0
+    Kp_val = np.tan(np.radians(45.0 + phi / 2.0)) ** 2
+    p_p_bot_act = (Kp_val * gamma_soil_dry * (h_soil_toe + h_ftg)) / FS_passive_val
+
+    p_v_heel = q_soil + q
+    p_w_back_act = gamma_w * Hwtr
+    p_w_front_act = gamma_w * Hwtr_front
+    p_upl_act = gamma_w * Hwtr
+
+    P_max_global = max(p_top_act, p_bot_act, p_p_bot_act, p_v_heel, p_w_back_act, p_w_front_act, p_upl_act, 30.0)
+    scale_press = 1.0 * mult / P_max_global
+
+    # Initialize drawing
+    d_load = draw.Drawing((ftg + 4.5)*mult, (max_height + 3.0)*mult, origin='bottom-left')
+    
+    # Helper for arrows
+    def draw_arrow_head(d, x1, y1, x2, y2, color='red', stroke_width=15, head_len=80, head_width=50):
+        d.append(draw.Line(x1, y1, x2, y2, stroke=color, stroke_width=stroke_width))
+        # Calculate arrowhead
+        dx = x2 - x1
+        dy = y2 - y1
+        L = np.hypot(dx, dy)
+        if L < 1e-6:
+            return
+        ux = dx / L
+        uy = dy / L
+        # Perp vector
+        px = -uy
+        py = ux
+        # Arrow head points
+        ax = x2 - head_len * ux
+        ay = y2 - head_len * uy
+        
+        p1x = ax + head_width * px
+        p1y = ay + head_width * py
+        p2x = ax - head_width * px
+        p2y = ay - head_width * py
+        
+        d.append(draw.Lines(x2, y2, p1x, p1y, p2x, p2y, close=True, fill=color, stroke=color))
+
+    # 1. Background Soil outlines/shapes (very light)
+    # Soil dry
+    if h_soil > Hwtr:
+        d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
+                             ftg*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
+                             ftg*mult + x_shift, -(h_soil+h_ftg)*mult - y_shift,
+                             (toe+bot_wall)*mult + x_shift, -(h_soil+h_ftg)*mult - y_shift,
+                             close=True, fill='#5BC2A5', fill_opacity=0.06, stroke='#bdc3c7', stroke_width=2, stroke_dasharray='10,10'))
+    # Soil wet
+    if h_wet_height > 0:
+        d_load.append(draw.Lines(ftg*mult + x_shift, -h_ftg*mult - y_shift,
+                             ftg*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
+                             (toe+bot_wall)*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
+                             (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
+                             close=True, fill='#A6F527', fill_opacity=0.06, stroke='#bdc3c7', stroke_width=2, stroke_dasharray='10,10'))
+    # Soil toe
+    if h_soil_toe > 0:
+        d_load.append(draw.Lines(x_shift, -h_ftg*mult - y_shift,
+                             toe*mult + x_shift, -h_ftg*mult - y_shift,
+                             toe*mult + x_shift, -(h_ftg + h_soil_toe)*mult - y_shift,
+                             x_shift, -(h_ftg + h_soil_toe)*mult - y_shift,
+                             close=True, fill='#5BC2A5', fill_opacity=0.06, stroke='#bdc3c7', stroke_width=2, stroke_dasharray='10,10'))
+
+    # Water level lines (dashed)
+    if Hwtr_front > 0:
+        d_load.append(draw.Line(x_shift, -(h_ftg + Hwtr_front)*mult - y_shift,
+                                toe*mult + x_shift, -(h_ftg + Hwtr_front)*mult - y_shift,
+                                stroke='blue', stroke_width=10, stroke_dasharray='30,30'))
+    if Hwtr > 0:
+        d_load.append(draw.Line((toe+bot_wall)*mult + x_shift, -(h_ftg + Hwtr)*mult - y_shift,
+                                ftg*mult + x_shift, -(h_ftg + Hwtr)*mult - y_shift,
+                                stroke='blue', stroke_width=10, stroke_dasharray='30,30'))
+
+    # 2. Draw yellow wall
+    d_load.append(draw.Lines(x_shift,  -y_shift,
+                        x_shift,  -h_ftg*mult - y_shift,
+                        toe*mult + x_shift, -h_ftg*mult - y_shift,
+                        (toe+(taper/4))*mult + x_shift, -(h_ftg+(Hw/4))*mult - y_shift,
+                        (toe+(taper/2))*mult + x_shift, -(h_ftg+(Hw/2))*mult - y_shift,
+                        (toe+(taper*(3/4)))*mult + x_shift, -(h_ftg+(Hw*(3/4)))*mult - y_shift,
+                        (toe+taper)*mult + x_shift, -(h_ftg+Hw)*mult - y_shift,
+                        (toe+bot_wall)*mult + x_shift, -(h_ftg+Hw)*mult - y_shift,
+                        (toe+bot_wall)*mult + x_shift, -(h_ftg+(Hw*(3/4)))*mult - y_shift,
+                        (toe+bot_wall)*mult + x_shift, -(h_ftg+(Hw/2))*mult - y_shift,
+                        (toe+bot_wall)*mult + x_shift, -(h_ftg+(Hw/4))*mult - y_shift,
+                        (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
+                        ftg*mult + x_shift, -h_ftg*mult - y_shift,
+                        ftg*mult + x_shift, -y_shift,
+                        close=True,
+                        fill='#eeee00',
+                        stroke='black',
+                        stroke_width=30))
+
+    # Draw Shear Key in d_load if enabled
+    if include_shear_key:
+        sk_x1 = shear_key_distance * mult + x_shift
+        sk_x2 = (shear_key_distance + shear_key_width) * mult + x_shift
+        sk_y1 = -y_shift
+        sk_y2 = -y_shift + shear_key_thickness * mult
+        d_load.append(draw.Lines(sk_x1, sk_y1,
+                            sk_x2, sk_y1,
+                            sk_x2, sk_y2,
+                            sk_x1, sk_y2,
+                            close=True,
+                            fill='#FFD700',
+                            stroke='black',
+                            stroke_width=20))
+
+    # 3. Dynamic loads
+    if selected_load_plot in ['soil lateral', 'total']:
+        h_active = min(Hw, h_soil)
+        if surcharge_type == 'Strip Load':
+            q_top = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - h_active))['delta sigma x [kPa]'] if h_soil > 0 else 0.0
+            q_bot = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, h_soil)['delta sigma x [kPa]']
+        else:
+            q_top = Ka * q if h_soil > 0 else 0.0
+            q_bot = Ka * q if h_soil > 0 else 0.0
+        
+        p_top = Ka * (gamma_soil_dry * max(0.0, h_soil - h_active)) + q_top if h_soil > 0 else 0.0
+        p_bot = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot if h_soil > 0 else 0.0
+        
+        FS_passive_val = 2.0
+        Kp_val = np.tan(np.radians(45.0 + phi / 2.0)) ** 2
+        p_p_top = (Kp_val * gamma_soil_dry * h_soil_toe) / FS_passive_val if h_soil_toe > 0 else 0.0
+        p_p_bot = (Kp_val * gamma_soil_dry * (h_soil_toe + h_ftg)) / FS_passive_val
+        
+        p_max_lat = max(p_top, p_bot, p_p_bot, 1.0)
+        scale_lat = scale_press
+        
+        d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -(h_ftg+h_active)*mult - y_shift,
+                            (toe+bot_wall)*mult + x_shift + p_top*scale_lat, -(h_ftg+h_active)*mult - y_shift,
+                            (toe+bot_wall)*mult + x_shift + p_bot*scale_lat, -h_ftg*mult - y_shift,
+                            (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
+                            close=True, fill='#E67E22', fill_opacity=0.3, stroke='#D35400', stroke_width=12))
+        
+        n_arr = 5
+        for i in range(n_arr):
+            frac = i / (n_arr - 1)
+            z_val = frac * h_active
+            if h_soil > 0:
+                hd = max(0.0, h_soil - max(z_val, Hwtr))
+                hw = max(0.0, min(h_soil, Hwtr) - z_val)
+                if surcharge_type == 'Strip Load':
+                    q_z = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - z_val))['delta sigma x [kPa]']
+                else:
+                    q_z = Ka * q
+                pz = Ka * (gamma_soil_dry * hd + gamma_soil_wet * hw) + q_z
+            else:
+                pz = 0.0
+            y_z = -(h_ftg + z_val)*mult - y_shift
+            x_start = (toe + bot_wall)*mult + x_shift + pz * scale_lat
+            x_end = (toe + bot_wall)*mult + x_shift
+            if pz > 0:
+                draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#D35400', stroke_width=10, head_len=60, head_width=35)
+        
+        d_load.append(draw.Lines(x_shift, -(h_ftg + h_soil_toe)*mult - y_shift,
+                            x_shift - p_p_top*scale_lat, -(h_ftg + h_soil_toe)*mult - y_shift,
+                            x_shift - p_p_bot*scale_lat, -h_ftg*mult - y_shift,
+                            x_shift, -h_ftg*mult - y_shift,
+                            close=True, fill='#2ECC71', fill_opacity=0.3, stroke='#27AE60', stroke_width=12))
+        
+        n_arr_p = 3
+        for i in range(n_arr_p):
+            frac = i / (n_arr_p - 1)
+            z_val = frac * (h_soil_toe + h_ftg)
+            depth_p = (h_soil_toe + h_ftg) - z_val
+            pz_p = (Kp_val * gamma_soil_dry * depth_p) / FS_passive_val
+            y_z = -z_val*mult - y_shift
+            x_start = x_shift - pz_p * scale_lat
+            x_end = x_shift
+            if pz_p > 0:
+                draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#27AE60', stroke_width=10, head_len=60, head_width=35)
+
+        d_load.append(draw.Text(f"{p_top:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_top*scale_lat + 0.20*mult, -(h_ftg+h_active)*mult - y_shift, fill='#D35400', font_weight='bold'))
+        d_load.append(draw.Text(f"{p_bot:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_bot*scale_lat + 0.20*mult, -h_ftg*mult - y_shift, fill='#D35400', font_weight='bold'))
+        d_load.append(draw.Text(f"{p_p_top:.2f} kPa", 0.20*mult, x_shift - p_p_top*scale_lat - 0.05*mult, -(h_ftg+h_soil_toe)*mult - y_shift, fill='#27AE60', font_weight='bold', text_anchor='end'))
+        d_load.append(draw.Text(f"{p_p_bot:.2f} kPa", 0.20*mult, x_shift - p_p_bot*scale_lat - 0.05*mult, -h_ftg*mult - y_shift, fill='#27AE60', font_weight='bold', text_anchor='end'))
+
+    if selected_load_plot in ['soil vertical', 'total']:
+        p_v = q_soil + q
+        scale_v = scale_press
+        d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
+                            (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift - p_v*scale_v,
+                            ftg*mult + x_shift, -h_ftg*mult - y_shift - p_v*scale_v,
+                            ftg*mult + x_shift, -h_ftg*mult - y_shift,
+                            close=True, fill='#F39C12', fill_opacity=0.3, stroke='#E67E22', stroke_width=12))
+        
+        n_arr = 5
+        for i in range(n_arr):
+            frac = i / (n_arr - 1)
+            x_pos = (toe + bot_wall + frac * heel)*mult + x_shift
+            y_start = -h_ftg*mult - y_shift - p_v*scale_v
+            y_end = -h_ftg*mult - y_shift
+            draw_arrow_head(d_load, x_pos, y_start, x_pos, y_end, color='#E67E22', stroke_width=10, head_len=60, head_width=35)
+        
+        d_load.append(draw.Text(f"{p_v:.2f} kPa", 0.20*mult, (toe+bot_wall + heel/2)*mult + x_shift, -h_ftg*mult - y_shift - p_v*scale_v - 0.22*mult, fill='#E67E22', text_anchor='middle', font_weight='bold'))
+
+    if selected_load_plot in ['hydrostatic', 'total']:
+        p_w_back = gamma_w * Hwtr
+        p_w_front = gamma_w * Hwtr_front
+        p_max_w = max(p_w_back, p_w_front, 1.0)
+        scale_w = scale_press
+        
+        if Hwtr > 0:
+            d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -(h_ftg+Hwtr)*mult - y_shift,
+                                (toe+bot_wall)*mult + x_shift + p_w_back*scale_w, -h_ftg*mult - y_shift,
+                                (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
+                                close=True, fill='#3498DB', fill_opacity=0.3, stroke='#2980B9', stroke_width=12))
+            n_arr = 3
+            for i in range(n_arr):
+                frac = i / (n_arr - 1)
+                z_val = frac * Hwtr
+                pz_w = gamma_w * (Hwtr - z_val)
+                y_z = -(h_ftg + z_val)*mult - y_shift
+                x_start = (toe + bot_wall)*mult + x_shift + pz_w * scale_w
+                x_end = (toe + bot_wall)*mult + x_shift
+                if pz_w > 0:
+                    draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#2980B9', stroke_width=10, head_len=50, head_width=30)
+            
+            d_load.append(draw.Text(f"{p_w_back:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_w_back*scale_w + 0.20*mult, -(h_ftg - 0.25)*mult - y_shift, fill='#2980B9', font_weight='bold'))
+
+        if Hwtr_front > 0:
+            d_load.append(draw.Lines(toe*mult + x_shift, -(h_ftg+Hwtr_front)*mult - y_shift,
+                                toe*mult + x_shift - p_w_front*scale_w, -h_ftg*mult - y_shift,
+                                toe*mult + x_shift, -h_ftg*mult - y_shift,
+                                close=True, fill='#3498DB', fill_opacity=0.3, stroke='#2980B9', stroke_width=12))
+            n_arr = 3
+            for i in range(n_arr):
+                frac = i / (n_arr - 1)
+                z_val = frac * Hwtr_front
+                pz_w = gamma_w * (Hwtr_front - z_val)
+                y_z = -(h_ftg + z_val)*mult - y_shift
+                x_start = toe*mult + x_shift - pz_w * scale_w
+                x_end = toe*mult + x_shift
+                if pz_w > 0:
+                    draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#2980B9', stroke_width=10, head_len=50, head_width=30)
+            
+            d_load.append(draw.Text(f"{p_w_front:.2f} kPa", 0.20*mult, toe*mult + x_shift - p_w_front*scale_w - 0.05*mult, -h_ftg*mult - y_shift, fill='#2980B9', font_weight='bold', text_anchor='end'))
+
+    if selected_load_plot in ['uplift', 'total']:
+        p_upl = gamma_w * Hwtr
+        if p_upl > 0:
+            scale_u = scale_press
+            d_load.append(draw.Lines(x_shift, -y_shift,
+                                x_shift, -y_shift + p_upl*scale_u,
+                                ftg*mult + x_shift, -y_shift + p_upl*scale_u,
+                                ftg*mult + x_shift, -y_shift,
+                                close=True, fill='#9B59B6', fill_opacity=0.3, stroke='#8E44AD', stroke_width=12))
+            
+            n_arr = 6
+            for i in range(n_arr):
+                frac = i / (n_arr - 1)
+                x_pos = frac * ftg * mult + x_shift
+                y_start = -y_shift + p_upl*scale_u
+                y_end = -y_shift
+                draw_arrow_head(d_load, x_pos, y_start, x_pos, y_end, color='#8E44AD', stroke_width=10, head_len=50, head_width=30)
+                
+            d_load.append(draw.Text(f"{p_upl:.2f} kPa", 0.20*mult, (ftg/2)*mult + x_shift, -y_shift + p_upl*scale_u + 0.25*mult, fill='#8E44AD', text_anchor='middle', font_weight='bold'))
+
+    if selected_load_plot in ['seismic', 'total']:
+        if kh > 0:
+            if stem_centroid[0] is not None:
+                sx, sy = stem_centroid[0]*mult + x_shift, stem_centroid[1]*mult - y_shift
+                draw_arrow_head(d_load, sx + 0.8*mult, sy, sx, sy, color='red', stroke_width=15, head_len=80, head_width=45)
+                d_load.append(draw.Text("Seismic (stem)", 0.18*mult, sx + 0.95*mult, sy + 0.05*mult, fill='red', font_weight='bold'))
+            if base_centroid[0] is not None:
+                bx, by = base_centroid[0]*mult + x_shift, base_centroid[1]*mult - y_shift
+                draw_arrow_head(d_load, bx + 0.8*mult, by, bx, by, color='red', stroke_width=15, head_len=80, head_width=45)
+                d_load.append(draw.Text("Seismic (base)", 0.18*mult, bx + 0.95*mult, by + 0.05*mult, fill='red', font_weight='bold'))
+            if 'soil_dry_centroid' in globals() and soil_dry_centroid[0] is not None:
+                sdx, sdy = soil_dry_centroid[0]*mult + x_shift, soil_dry_centroid[1]*mult - y_shift
+                draw_arrow_head(d_load, sdx + 0.8*mult, sdy, sdx, sdy, color='red', stroke_width=15, head_len=80, head_width=45)
+                d_load.append(draw.Text("Seismic (soil dry)", 0.18*mult, sdx + 0.95*mult, sdy + 0.05*mult, fill='red', font_weight='bold'))
+            elif 'soil_dry_centroid' in locals() and soil_dry_centroid[0] is not None:
+                sdx, sdy = soil_dry_centroid[0]*mult + x_shift, soil_dry_centroid[1]*mult - y_shift
+                draw_arrow_head(d_load, sdx + 0.8*mult, sdy, sdx, sdy, color='red', stroke_width=15, head_len=80, head_width=45)
+                d_load.append(draw.Text("Seismic (soil dry)", 0.18*mult, sdx + 0.95*mult, sdy + 0.05*mult, fill='red', font_weight='bold'))
+
+            if 'soil_wet_centroid' in globals() and soil_wet_centroid[0] is not None:
+                swx, swy = soil_wet_centroid[0]*mult + x_shift, soil_wet_centroid[1]*mult - y_shift
+                draw_arrow_head(d_load, swx + 0.8*mult, swy, swx, swy, color='red', stroke_width=15, head_len=80, head_width=45)
+                d_load.append(draw.Text("Seismic (soil wet)", 0.18*mult, swx + 0.95*mult, swy + 0.05*mult, fill='red', font_weight='bold'))
+            elif 'soil_wet_centroid' in locals() and soil_wet_centroid[0] is not None:
+                swx, swy = soil_wet_centroid[0]*mult + x_shift, soil_wet_centroid[1]*mult - y_shift
+                draw_arrow_head(d_load, swx + 0.8*mult, swy, swx, swy, color='red', stroke_width=15, head_len=80, head_width=45)
+                d_load.append(draw.Text("Seismic (soil wet)", 0.18*mult, swx + 0.95*mult, swy + 0.05*mult, fill='red', font_weight='bold'))
+
+    if selected_load_plot == 'total':
+        if base_centroid[0] is not None:
+            bx, by = base_centroid[0]*mult + x_shift, base_centroid[1]*mult - y_shift
+            draw_arrow_head(d_load, bx, by - 0.8*mult, bx, by, color='blue', stroke_width=15, head_len=80, head_width=45)
+            d_load.append(draw.Text(f"W_base = {W_base:.1f} kN", 0.18*mult, bx, by - 1.0*mult, fill='blue', text_anchor='middle'))
+        if stem_centroid[0] is not None:
+            sx, sy = stem_centroid[0]*mult + x_shift, stem_centroid[1]*mult - y_shift
+            draw_arrow_head(d_load, sx, sy - 0.8*mult, sx, sy, color='blue', stroke_width=15, head_len=80, head_width=45)
+            d_load.append(draw.Text(f"W_stem = {W_stem_rect:.1f} kN", 0.18*mult, sx, sy - 1.0*mult, fill='blue', text_anchor='middle'))
+
+    return d_load
+
+def generate_latex_equation_images():
+    import matplotlib.pyplot as plt
+    import os
+    os.makedirs("report_temp", exist_ok=True)
+    
+    def render_eq(latex_str, filename):
+        fig, ax = plt.subplots(figsize=(6, 0.9))
+        fig.patch.set_facecolor('none')
+        ax.patch.set_facecolor('none')
+        if not latex_str.startswith("$"):
+            latex_str = f"${latex_str}$"
+        ax.text(0.5, 0.5, latex_str, fontsize=14, ha='center', va='center', color='#162447')
+        ax.axis('off')
+        path = os.path.join("report_temp", filename)
+        fig.savefig(path, dpi=200, bbox_inches='tight', transparent=True)
+        plt.close(fig)
+
+    try:
+        render_eq(r"K_a = \tan^2\left(45^\circ - \frac{\phi}{2}\right)", "eq_ka.png")
+        render_eq(r"p_{act,top} = K_a \cdot q", "eq_p_act_top.png")
+        render_eq(r"p_{act,bot} = K_a \cdot (\gamma_{dry} z_{dry} + \gamma_{wet} z_{wet}) + K_a \cdot q", "eq_p_act_bot.png")
+        render_eq(r"K_p = \tan^2\left(45^\circ + \frac{\phi}{2}\right)", "eq_kp.png")
+        render_eq(r"p_{pass,bot} = \frac{K_p \cdot \gamma_{dry} \cdot (h_{toe} + h_{ftg})}{FS_{pass}}", "eq_p_pass_bot.png")
+        render_eq(r"p_{v,heel} = q_{soil} + q", "eq_p_v_heel.png")
+        render_eq(r"p_{w} = \gamma_w \cdot H_{wtr}", "eq_p_w.png")
+        render_eq(r"p_{uplift} = \gamma_w \cdot H_{wtr}", "eq_p_uplift.png")
+        render_eq(r"FS_{sliding} = \frac{\sum R_{resisting}}{\sum F_{driving}} = \frac{R_{sliding} + P_{passive}}{F_{driving}}", "eq_sliding.png")
+        render_eq(r"FS_{overturning} = \frac{\sum M_{resisting}}{\sum M_{overturning}} = \frac{M_{res}}{M_{ot}}", "eq_overturning.png")
+        render_eq(r"\sigma_{max,min} = \frac{R_v}{B} \left( 1 \pm \frac{6e}{B} \right)", "eq_bearing_stress.png")
+        render_eq(r"FS_{bearing} = \frac{q_{ult}}{\sigma_{max}}", "eq_bearing_fs.png")
+        render_eq(r"S_c = \frac{C_c \cdot H_c}{1 + e_0} \log\left( \frac{\sigma'_{v0} + \Delta \sigma}{\sigma'_{v0}} \right)", "eq_settlement.png")
+    except Exception as e_eq:
+        print(f"Error rendering latex equations: {e_eq}")
+
+def export_report_assets():
+    import os
+    import cairosvg
+    os.makedirs("report_temp", exist_ok=True)
+    
+    # Save geometry drawings
+    if 'd' in globals() and d is not None:
+        try:
+            d.set_render_size(800, 550)
+            cairosvg.svg2png(bytestring=d.as_svg(), write_to="report_temp/model_geometry.png", output_width=800)
+        except Exception:
+            pass
+    if 'd_sni' in globals() and d_sni is not None:
+        try:
+            d_sni.set_render_size(800, 550)
+            cairosvg.svg2png(bytestring=d_sni.as_svg(), write_to="report_temp/typical_dimensions.png", output_width=800)
+        except Exception:
+            pass
+            
+    # Save load drawings (scaled down for MS Word display compatibility)
+    for lt in ["total", "soil lateral", "soil vertical", "hydrostatic", "uplift", "seismic"]:
+        try:
+            d_l = generate_load_drawing(lt)
+            if d_l is not None:
+                d_l.set_render_size(800, 550)
+                filename = f"load_{lt.replace(' ', '_')}.png"
+                cairosvg.svg2png(bytestring=d_l.as_svg(), write_to=os.path.join("report_temp", filename), output_width=800)
+        except Exception:
+            pass
+            
+    # Save pile drawings
+    if 'd_pile_svg' in globals() and d_pile_svg is not None:
+        try:
+            d_pile_svg.set_render_size(800, 550)
+            cairosvg.svg2png(bytestring=d_pile_svg.as_svg(), write_to="report_temp/pile_elevation.png", output_width=800)
+        except Exception:
+            pass
+            
+    # Save matplotlib figures (make sure they are updated)
+    if 'fig_winkler' in globals() and fig_winkler is not None:
+        try:
+            fig_winkler.savefig("report_temp/pile_winkler.png", dpi=150, bbox_inches='tight')
+        except Exception:
+            pass
+    if 'fig_ssrm' in globals() and fig_ssrm is not None:
+        try:
+            fig_ssrm.savefig("report_temp/stability_ssrm.png", dpi=150, bbox_inches='tight')
+        except Exception:
+            pass
+    if 'fig_pile_sec' in globals() and fig_pile_sec is not None:
+        try:
+            fig_pile_sec.savefig("report_temp/pile_section.png", dpi=150, bbox_inches='tight')
+        except Exception:
+            pass
+
+    generate_latex_equation_images()
+
+def build_latex_code():
+    import re
+    def esc(text):
+        if not isinstance(text, str):
+            text = str(text)
+        conv = {'&': r'\&', '%': r'\%', '$': r'\$', '#': r'\#', '_': r'\_', '{': r'\{', '}': r'\}'}
+        return "".join(conv.get(c, c) for c in text)
+
+    tex = []
+    tex.append(r"\documentclass[10pt,a4paper]{article}")
+    tex.append(r"\usepackage[margin=1in]{geometry}")
+    tex.append(r"\usepackage{graphicx}")
+    tex.append(r"\usepackage{amsmath}")
+    tex.append(r"\usepackage{booktabs}")
+    tex.append(r"\usepackage{float}")
+    tex.append(r"\usepackage{longtable}")
+    tex.append(r"\usepackage{hyperref}")
+    tex.append(r"\usepackage{fancyhdr}")
+    tex.append(r"\usepackage{caption}")
+    
+    tex.append(r"\pagestyle{fancy}")
+    tex.append(r"\fancyhf{}")
+    tex.append(r"\lhead{Cantilever Retaining Wall Engineering Report}")
+    tex.append(r"\rhead{\thepage}")
+    
+    tex.append(r"\begin{document}")
+    
+    # Title Page
+    tex.append(r"\title{\textbf{Retaining Wall Design \& Verification Report}}")
+    tex.append(r"\author{RT Wall Cantilever}")
+    tex.append(r"\date{\today}")
+    tex.append(r"\maketitle")
+    tex.append(r"\tableofcontents")
+    tex.append(r"\newpage")
+    
+    # Section 1: Input Parameters
+    tex.append(r"\section{Input Parameters}")
+    tex.append(r"The following design parameters were specified for this analysis:")
+    
+    # Geometry Table
+    tex.append(r"\subsection{Wall Geometry}")
+    tex.append(r"\begin{longtable}{lll}")
+    tex.append(r"\toprule")
+    tex.append(r"Parameter & Symbol & Value \\")
+    tex.append(r"\midrule")
+    tex.append(f"Out-of-plane thickness & $t$ & {t:.3f} m \\\\")
+    tex.append(f"Wall height & $H_w$ & {Hw:.3f} m \\\\")
+    tex.append(f"Toe length & $L_{{toe}}$ & {toe:.3f} m \\\\")
+    tex.append(f"Heel length & $L_{{heel}}$ & {heel:.3f} m \\\\")
+    tex.append(f"Top wall thickness & $b_{{top}}$ & {top_wall:.3f} m \\\\")
+    tex.append(f"Bottom wall thickness & $b_{{bot}}$ & {bot_wall:.3f} m \\\\")
+    tex.append(f"Footing thickness & $h_{{ftg}}$ & {h_ftg:.3f} m \\\\")
+    if include_shear_key:
+        tex.append(f"Shear key distance & $x_{{sk}}$ & {shear_key_distance:.3f} m \\\\")
+        tex.append(f"Shear key width & $w_{{sk}}$ & {shear_key_width:.3f} m \\\\")
+        tex.append(f"Shear key thickness & $t_{{sk}}$ & {shear_key_thickness:.3f} m \\\\")
+    tex.append(r"\bottomrule")
+    tex.append(r"\end{longtable}")
+
+    # SNI Typical Geometry verification checklist table
+    H_tot = Hw + h_ftg
+    tex.append(r"\subsection{SNI Typical Geometry Verification Checklist}")
+    tex.append(r"Indonesian Geotechnical Standard (SNI Perencanaan Geoteknik) dimension ratios verification checklist:")
+    tex.append(r"\begin{longtable}{lllll}")
+    tex.append(r"\toprule")
+    tex.append(r"Parameter Name & Symbol & Input Value & SNI Requirement & Status \\")
+    tex.append(r"\midrule")
+    tex.append(f"Top Wall Thickness & $b_{{top}}$ & {top_wall:.2f} m & $\\ge 0.30$ m & {{'PASS' if top_wall >= 0.30 else 'FAIL'}} \\\\")
+    tex.append(f"Base Stem Thickness & $b_{{bot}}$ & {bot_wall:.2f} m & $\\ge 0.1 H$ ({0.1*H_tot:.2f} m) & {{'PASS' if bot_wall >= 0.1*H_tot else 'FAIL'}} \\\\")
+    slope_val = taper / Hw if Hw > 0 else 0.0
+    tex.append(f"Front Face Batter Slope & $\\text{{slope}}$ & {slope_val:.4f} & $\\ge 1:48$ (0.0208) & {{'PASS' if slope_val >= (1.0/48.0) else 'FAIL'}} \\\\")
+    tex.append(f"Footing Width & $B$ & {ftg:.2f} m & $0.4 H \\sim 0.7 H$ ({0.4*H_tot:.2f} $\\sim$ {0.7*H_tot:.2f} m) & {{'PASS' if 0.4*H_tot <= ftg <= 0.7*H_tot else 'FAIL'}} \\\\")
+    tex.append(f"Footing Thickness & $h_{{ftg}}$ & {h_ftg:.2f} m & $H/12 \\sim H/10$ ({H_tot/12:.2f} $\\sim$ {H_tot/10:.2f} m) & {{'PASS' if H_tot/12 <= h_ftg <= H_tot/10 else 'FAIL'}} \\\\")
+    tex.append(f"Toe Slab Length & $L_{{toe}}$ & {toe:.2f} m & $\\ge B/3$ ({ftg/3:.2f} m) & {{'PASS' if toe >= ftg/3 else 'FAIL'}} \\\\")
+    tex.append(r"\bottomrule")
+    tex.append(r"\end{longtable}")
+    
+    # Soil Table
+    tex.append(r"\subsection{Soil \& Water Parameters}")
+    tex.append(r"\begin{longtable}{lll}")
+    tex.append(r"\toprule")
+    tex.append(r"Parameter & Symbol & Value \\")
+    tex.append(r"\midrule")
+    tex.append(f"Dry unit weight & $\\gamma_{{dry}}$ & {gamma_soil_dry:.2f} kN/m$^3$ \\\\")
+    tex.append(f"Wet unit weight & $\\gamma_{{wet}}$ & {gamma_soil_wet:.2f} kN/m$^3$ \\\\")
+    tex.append(f"Friction angle & $\\phi$ & {phi:.1f}$^\circ$ \\\\")
+    tex.append(f"Soil cohesion & $c$ & {c_soil:.1f} kPa \\\\")
+    tex.append(f"Surcharge load & $q$ & {q:.2f} kPa \\\\")
+    if surcharge_type == 'Strip Load':
+        tex.append(f"Surcharge width & $B_q$ & {width_surcharge:.2f} m \\\\")
+        tex.append(f"Surcharge offset & $a_q$ & {offset_surcharge:.2f} m \\\\")
+    tex.append(f"Soil height above heel & $h_{{soil}}$ & {h_soil:.3f} m \\\\")
+    tex.append(f"Soil above toe & $h_{{toe}}$ & {h_soil_toe:.3f} m \\\\")
+    tex.append(f"Water unit weight & $\\gamma_w$ & {gamma_w:.2f} kN/m$^3$ \\\\")
+    tex.append(f"Water height (heel) & $H_{{wtr}}$ & {Hwtr:.2f} m \\\\")
+    tex.append(f"Water height (toe) & $H_{{wtr,front}}$ & {Hwtr_front:.3f} m \\\\")
+    tex.append(r"\bottomrule")
+    tex.append(r"\end{longtable}")
+
+    # Concrete and Reinf
+    tex.append(r"\subsection{Concrete \& Reinforcement Parameters}")
+    tex.append(r"\begin{longtable}{lll}")
+    tex.append(r"\toprule")
+    tex.append(r"Parameter & Symbol & Value \\")
+    tex.append(r"\midrule")
+    tex.append(f"Concrete strength & $f'_c$ & {fc:.1f} MPa \\\\")
+    tex.append(f"Elastic modulus (concrete) & $E_c$ & {Ec/1000:.1f} GPa \\\\")
+    tex.append(f"Steel yield strength & $f_y$ & {fy:.1f} MPa \\\\")
+    tex.append(f"Stem main rebar dia & $d_{{stem}}$ & {stem_rebar_dia} mm \\\\")
+    tex.append(f"Stem bar spacing & $s_{{stem}}$ & {stem_spacing_x} mm \\\\")
+    tex.append(f"Footing main rebar dia & $d_{{ftg}}$ & {ftg_rebar_dia} mm \\\\")
+    tex.append(f"Footing bar spacing & $s_{{ftg}}$ & {ftg_spacing_x} mm \\\\")
+    tex.append(r"\bottomrule")
+    tex.append(r"\end{longtable}")
+    
+    # Section 2: Model and geometries image
+    tex.append(r"\newpage")
+    tex.append(r"\section{Model \& Geometry Diagrams}")
+    tex.append(r"\begin{figure}[H]")
+    tex.append(r"\centering")
+    tex.append(r"\includegraphics[width=0.8\textwidth]{report_temp/model_geometry.png}")
+    tex.append(r"\caption{Retaining Wall Geometry and Mesh Outline}")
+    tex.append(r"\end{figure}")
+    
+    tex.append(r"\begin{figure}[H]")
+    tex.append(r"\centering")
+    tex.append(r"\includegraphics[width=0.8\textwidth]{report_temp/typical_dimensions.png}")
+    tex.append(r"\caption{Dimensions Verification per SNI Geotechnical Standards}")
+    tex.append(r"\end{figure}")
+    
+    # Section 3: Applied Loads & Pressure Distributions
+    tex.append(r"\newpage")
+    tex.append(r"\section{Applied Loads \& Pressure Distributions}")
+    tex.append(r"The boundary loads and pressure profiles are divided by loading type:")
+
+    load_types = [
+        ("soil_lateral", "Soil Lateral Pressure (Active/Passive)"),
+        ("soil_vertical", "Soil Vertical Load"),
+        ("hydrostatic", "Hydrostatic Water Pressure"),
+        ("uplift", "Uplift Pressure"),
+        ("seismic", "Seismic Force"),
+        ("total", "Total / Combined Loading")
+    ]
+    for key, name in load_types:
+        tex.append(f"\\subsection{{{name}}}")
+        tex.append(f"The load diagram for {name} is shown below:")
+        tex.append(r"\begin{figure}[H]")
+        tex.append(r"\centering")
+        tex.append(f"\\includegraphics[width=0.7\\textwidth]{{report_temp/load_{key}.png}}")
+        tex.append(f"\\caption{{{name} Diagram}}")
+        tex.append(r"\end{figure}")
+
+    # Analytical load calculation breakdowns
+    tex.append(r"\subsection{Analytical Load Calculation Breakdown}")
+    
+    # 1. Soil Lateral Pressure Calculation
+    tex.append(r"\subsubsection{Active \& Passive Lateral Earth Pressure}")
+    tex.append(r"Active and Passive lateral earth pressure parameters calculated per Terzaghi / Rankine equations:")
+    tex.append(r"\begin{itemize}")
+    tex.append(f"\\item Coefficient of active earth pressure: $K_a = \\tan^2(45^\\circ - \\phi/2) = {Ka:.4f}$")
+    h_active = min(Hw, h_soil)
+    if surcharge_type == 'Strip Load':
+        q_top = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - h_active))['delta sigma x [kPa]'] if h_soil > 0 else 0.0
+        q_bot = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, h_soil)['delta sigma x [kPa]']
+    else:
+        q_top = Ka * q if h_soil > 0 else 0.0
+        q_bot = Ka * q if h_soil > 0 else 0.0
+    p_top_act = Ka * (gamma_soil_dry * max(0.0, h_soil - h_active)) + q_top if h_soil > 0 else 0.0
+    p_bot_act = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot if h_soil > 0 else 0.0
+    tex.append(f"\\item Active lateral pressure at stem top ($p_{{act,top}}$): $K_a \\cdot (\\gamma \\cdot z_{{top}}) + K_a \\cdot q = {p_top_act:.2f}$ kPa")
+    tex.append(f"\\item Active lateral pressure at footing bottom ($p_{{act,bot}}$): $K_a \\cdot (\\gamma \\cdot z_{{bot}}) + K_a \\cdot q = {p_bot_act:.2f}$ kPa")
+    
+    FS_passive_val = 2.0
+    Kp_val = np.tan(np.radians(45.0 + phi / 2.0)) ** 2
+    p_p_top = (Kp_val * gamma_soil_dry * h_soil_toe) / FS_passive_val if h_soil_toe > 0 else 0.0
+    p_p_bot = (Kp_val * gamma_soil_dry * (h_soil_toe + h_ftg)) / FS_passive_val
+    tex.append(f"\\item Coefficient of passive earth pressure: $K_p = \\tan^2(45^\\circ + \\phi/2) = {Kp_val:.4f}$")
+    tex.append(f"\\item Mobilized passive lateral pressure at toe top ($p_{{pass,top}}$): $K_p \\cdot \\gamma_{{dry}} \\cdot h_{{toe}} / FS_{{pass}} = {p_p_top:.2f}$ kPa")
+    tex.append(f"\\item Mobilized passive lateral pressure at footing bottom ($p_{{pass,bot}}$): $K_p \\cdot \\gamma_{{dry}} \\cdot (h_{{toe}} + h_{{ftg}}) / FS_{{pass}} = {p_p_bot:.2f}$ kPa")
+    tex.append(r"\end{itemize}")
+
+    # 2. Soil Vertical weight and Surcharge
+    tex.append(r"\subsubsection{Vertical Overburden \& Surcharge pressures}")
+    p_v = q_soil + q
+    tex.append(r"\begin{itemize}")
+    tex.append(f"\\item Footing heel total vertical surcharge + backfill pressure ($p_{{v,heel}}$): $q_{{soil}} + q = {p_v:.2f}$ kPa")
+    tex.append(r"\end{itemize}")
+
+    # 3. Hydrostatic and uplift
+    tex.append(r"\subsubsection{Hydrostatic Water \& Uplift Pressures}")
+    p_w_back = gamma_w * Hwtr
+    p_w_front = gamma_w * Hwtr_front
+    p_upl = gamma_w * Hwtr
+    tex.append(r"\begin{itemize}")
+    tex.append(f"\\item Backwater hydrostatic pressure at footing base: $\\gamma_w \\cdot H_{{wtr}} = {p_w_back:.2f}$ kPa")
+    tex.append(f"\\item Front water hydrostatic pressure at footing base: $\\gamma_w \\cdot H_{{wtr,front}} = {p_w_front:.2f}$ kPa")
+    tex.append(f"\\item Footing base uniform water uplift pressure: $\\gamma_w \\cdot H_{{wtr}} = {p_upl:.2f}$ kPa")
+    tex.append(r"\end{itemize}")
+
+    # Section 4: Stability Report
+    tex.append(r"\newpage")
+    tex.append(r"\section{Stability Analysis \& Verification}")
+    tex.append(r"The calculations for factors of safety against overturning, sliding, and slope stability are summarized below:")
+    
+    tex.append(r"\subsection{Sliding Safety Factor Check}")
+    tex.append(r"The safety factor against sliding is calculated as the ratio of resisting shear forces along the footing base (including mobilized passive soil resistance) to driving active lateral forces:")
+    tex.append(r"\begin{equation}")
+    tex.append(r"FS_{sliding} = \frac{\sum R_{resisting}}{\sum F_{driving}} = \frac{R_{sliding} + P_{passive}}{F_{driving}}")
+    tex.append(r"\end{equation}")
+    if 'FS_slide_global' in globals() and FS_slide_global is not None:
+        tex.append(f"Calculated Sliding FS = {FS_slide_global:.3f} (Required $\\ge 1.5$) \\hfill [{'PASS' if FS_slide_global >= 1.5 else 'FAIL'}]")
+
+    tex.append(r"\subsection{Overturning Safety Factor Check}")
+    tex.append(r"The safety factor against overturning is computed about the toe edge pivot point ($x=0.0$) as the ratio of stabilizing resisting moments to overturning driving moments:")
+    tex.append(r"\begin{equation}")
+    tex.append(r"FS_{overturning} = \frac{\sum M_{resisting}}{\sum M_{overturning}}")
+    tex.append(r"\end{equation}")
+    if 'FS_ot_global' in globals() and FS_ot_global is not None:
+        tex.append(f"Calculated Overturning FS = {FS_ot_global:.3f} (Required $\\ge 1.5$) \\hfill [{'PASS' if FS_ot_global >= 1.5 else 'FAIL'}]")
+    
+    if 'fs_ssrm' in globals() and fs_ssrm is not None:
+        tex.append(r"\subsection{Slope Stability SSRM Safety Factor Check}")
+        tex.append(f"Global SSRM Slope Stability: Actual FS = {fs_ssrm:.3f} \\hfill [{'PASS' if ssrm_pass else 'FAIL'}]")
+    
+    if 'fig_ssrm' in globals() and fig_ssrm is not None:
+        tex.append(r"\begin{figure}[H]")
+        tex.append(r"\centering")
+        tex.append(r"\includegraphics[width=0.8\textwidth]{report_temp/stability_ssrm.png}")
+        tex.append(r"\caption{SSRM Viscoplastic Shear Strain (Failure Surface) Diagram}")
+        tex.append(r"\end{figure}")
+        
+    # Section 5: Bearing Capacity Calculation Breakdown
+    if enable_bearing:
+        tex.append(r"\newpage")
+        tex.append(r"\section{Bearing Capacity Breakdown}")
+        tex.append(r"The bearing capacity safety factor and consolidation settlements are verified as follows:")
+        
+        tex.append(r"\subsection{Bearing Capacity & Eccentricity check}")
+        tex.append(r"The maximum and minimum soil contact stresses are calculated by checking structural eccentricity ($e$):")
+        tex.append(r"\begin{equation}")
+        tex.append(r"\sigma_{max,min} = \frac{R_v}{B} \left( 1 \pm \frac{6e}{B} \right) \quad \text{for } e \le B/6")
+        tex.append(r"\end{equation}")
+        tex.append(r"\begin{equation}")
+        tex.append(r"FS_{bearing} = \frac{q_{ult}}{\sigma_{max}}")
+        tex.append(r"\end{equation}")
+        
+        tex.append(r"\begin{itemize}")
+        if 'q_ult' in globals() and q_ult is not None:
+            tex.append(f"\\item Ultimate bearing capacity: $q_{{ult}}$ = {q_ult:.2f} kPa")
+            if 'sigma_max' in globals() and sigma_max is not None:
+                tex.append(f"\\item Max bearing stress: $\\sigma_{{max}}$ = {sigma_max:.2f} kPa")
+                tex.append(f"\\item Safety factor against bearing failure: Actual FS = {q_ult/sigma_max:.2f} (Required $\\ge {FS_bearing:.1f}$)")
+        tex.append(r"\end{itemize}")
+
+        tex.append(r"\subsection{Consolidation Settlement Calculation}")
+        tex.append(r"One-dimensional primary consolidation settlement is computed using the compression index $C_c$, thickness $H_c$, and vertical stress increase:")
+        tex.append(r"\begin{equation}")
+        tex.append(r"S_c = \frac{C_c \cdot H_c}{1 + e_0} \log\left( \frac{\sigma'_{v0} + \Delta \sigma}{\sigma'_{v0}} \right)")
+        tex.append(r"\end{equation}")
+        tex.append(r"\begin{itemize}")
+        if 'consol_settlement_mm' in globals() and consol_settlement_mm is not None:
+            tex.append(f"\\item Consolidation settlement: $s_{{consol}}$ = {consol_settlement_mm:.2f} mm (Allowable = {consol_allow_mm:.2f} mm) \\hfill [{'PASS' if consol_pass else 'FAIL'}]")
+        tex.append(r"\end{itemize}")
+
+    # Section 6: FEM Settlement and Displacement Report
+    tex.append(r"\newpage")
+    tex.append(r"\section{FEM Settlement \& Bottom Displacements}")
+    tex.append(r"Deformations and settlements computed at the base of the footing using soil spring finite element analysis:")
+    tex.append(r"\begin{itemize}")
+    tex.append(f"\\item Toe settlement: {settlement_toe_mm:.2f} mm")
+    tex.append(f"\\item Heel settlement: {settlement_heel_mm:.2f} mm")
+    tex.append(f"\\item Differential settlement: {diff_settlement_mm:.2f} mm (Allowable $\\le {allowable_diff_settlement_mm:.1f}$ mm) \\hfill [{'PASS' if diff_settlement_pass else 'FAIL'}]")
+    tex.append(f"\\item Wall rotation: {rotation_deg:.4f}$^\\circ$")
+    tex.append(r"\end{itemize}")
+
+    if 'df_bottom_disp' in globals() and df_bottom_disp is not None and not df_bottom_disp.empty:
+        tex.append(r"\subsection{Footing Base Nodes Displacement Table}")
+        tex.append(r"\begin{longtable}{ccccc}")
+        tex.append(r"\toprule")
+        tex.append(r"Node & X Position (m) & Disp X (mm) & Disp Y (mm) & Settlement (mm) \\")
+        tex.append(r"\midrule")
+        for idx, row in df_bottom_disp.iterrows():
+            tex.append(f"{int(row['Node'])} & {row['X Position (m)']:.3f} & {row['Disp X (mm)']:.4f} & {row['Disp Y (mm)']:.4f} & {row['Settlement (mm)']:.4f} \\\\")
+        tex.append(r"\bottomrule")
+        tex.append(r"\end{longtable}")
+
+    # Section: Finite Element Stress contours and Bending moment plots
+    tex.append(r"\newpage")
+    tex.append(r"\section{Finite Element Stress \& Bending Moment Contours}")
+    tex.append(r"Finite element stress contours and internal bending moments mapping across the concrete wall cross-section:")
+    
+    if os.path.exists("report_temp/stem_bending_moment.png"):
+        tex.append(r"\begin{figure}[H]")
+        tex.append(r"\centering")
+        tex.append(r"\includegraphics[width=0.75\textwidth]{report_temp/stem_bending_moment.png}")
+        tex.append(r"\caption{Stem Wall Internal Bending Moment Diagram (kN$\cdot$m)}")
+        tex.append(r"\end{figure}")
+        
+    if os.path.exists("report_temp/stress_xx.png"):
+        tex.append(r"\begin{figure}[H]")
+        tex.append(r"\centering")
+        tex.append(r"\includegraphics[width=0.7\textwidth]{report_temp/stress_xx.png}")
+        tex.append(r"\caption{FE stress contour in X-Direction $\sigma_{xx}$ (kN/m$^2$)}")
+        tex.append(r"\end{figure}")
+
+    if os.path.exists("report_temp/stress_yy.png"):
+        tex.append(r"\begin{figure}[H]")
+        tex.append(r"\centering")
+        tex.append(r"\includegraphics[width=0.7\textwidth]{report_temp/stress_yy.png}")
+        tex.append(r"\caption{FE stress contour in Y-Direction $\sigma_{yy}$ (kN/m$^2$)}")
+        tex.append(r"\end{figure}")
+
+    # Section 7: Pile Design
+    if enable_pile:
+        tex.append(r"\newpage")
+        tex.append(r"\section{Pile Foundation Design \& Verification}")
+        tex.append(r"Detailed pile demands, capacities, Winkler analysis results, and interaction diagram checks:")
+        
+        # Demands vs Capacities
+        tex.append(r"\subsection{Axial \& Lateral Pile Capacities}")
+        tex.append(r"\begin{longtable}{lll}")
+        tex.append(r"\toprule")
+        tex.append(r"Capacity Parameter & Symbol & Value \\")
+        tex.append(r"\midrule")
+        if 'Q_comp_allow' in globals() and Q_comp_allow is not None:
+            tex.append(f"Allowable Compressive Capacity & $Q_{{comp,allow}}$ & {Q_comp_allow:.2f} kN \\\\")
+            tex.append(f"Allowable Tensile Capacity & $Q_{{tens,allow}}$ & {Q_tens_allow:.2f} kN \\\\")
+        if 'H_allow' in globals() and H_allow is not None:
+            tex.append(f"Allowable Lateral Capacity & $H_{{allow}}$ & {H_allow:.2f} kN \\\\")
+        tex.append(r"\bottomrule")
+        tex.append(r"\end{longtable}")
+
+        # Verification checklist
+        tex.append(r"\subsection{Pile Foundation Demands Verification}")
+        tex.append(r"\begin{itemize}")
+        if 'P_toe' in globals() and P_toe is not None:
+            tex.append(f"\\item \\textbf{{Toe Pile Axial Demand}}: $P_{{toe}}$ = {P_toe:.2f} kN \\hfill [{'PASS' if pile_pass_toe_axial else 'FAIL'}]")
+            tex.append(f"\\item \\textbf{{Toe Pile Lateral Demand}}: $V_{{max,toe}}$ = {V_max_toe:.2f} kN \\hfill [{'PASS' if pile_pass_toe_lateral else 'FAIL'}]")
+            tex.append(f"\\item \\textbf{{Toe Pile Interaction Check}}: \\hfill [{'PASS' if pile_pass_toe_interaction else 'FAIL'}]")
+            
+        if 'P_heel' in globals() and P_heel is not None:
+            tex.append(f"\\item \\textbf{{Heel Pile Axial Demand}}: $P_{{heel}}$ = {P_heel:.2f} kN \\hfill [{'PASS' if pile_pass_heel_axial else 'FAIL'}]")
+            tex.append(f"\\item \\textbf{{Heel Pile Lateral Demand}}: $V_{{max,heel}}$ = {V_max_heel:.2f} kN \\hfill [{'PASS' if pile_pass_heel_lateral else 'FAIL'}]")
+            tex.append(f"\\item \\textbf{{Heel Pile Interaction Check}}: \\hfill [{'PASS' if pile_pass_heel_interaction else 'FAIL'}]")
+        tex.append(r"\end{itemize}")
+
+        # Pile Drawings
+        tex.append(r"\subsection{Pile Layout \& Elevation Schematic}")
+        tex.append(r"\begin{figure}[H]")
+        tex.append(r"\centering")
+        tex.append(r"\includegraphics[width=0.6\textwidth]{report_temp/pile_elevation.png}")
+        tex.append(r"\caption{Pile Layout under Footing Base with Reaction Forces}")
+        tex.append(r"\end{figure}")
+        
+        tex.append(r"\begin{figure}[H]")
+        tex.append(r"\centering")
+        tex.append(r"\includegraphics[width=0.8\textwidth]{report_temp/pile_winkler.png}")
+        tex.append(r"\caption{Pile Winkler Analysis Response Profiles}")
+        tex.append(r"\end{figure}")
+        
+        tex.append(r"\begin{figure}[H]")
+        tex.append(r"\centering")
+        tex.append(r"\includegraphics[width=0.8\textwidth]{report_temp/pile_interaction.png}")
+        tex.append(r"\caption{Moment-Axial capacity envelope of the Pile}")
+        tex.append(r"\end{figure}")
+        
+        tex.append(r"\begin{figure}[H]")
+        tex.append(r"\centering")
+        tex.append(r"\includegraphics[width=0.5\textwidth]{report_temp/pile_section.png}")
+        tex.append(r"\caption{Pile Cross Section Details}")
+        tex.append(r"\end{figure}")
+
+    tex.append(r"\end{document}")
+    return "\n".join(tex)
+
+def generate_pdf_reportlab(output_path):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    import os
+    import datetime
+
+    doc = SimpleDocTemplate(
+        output_path,
+        pagesize=A4,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40
+    )
+    
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    title_style = ParagraphStyle(
+        'DocTitle',
+        parent=styles['Heading1'],
+        fontSize=22,
+        leading=26,
+        textColor=colors.HexColor('#162447'),
+        alignment=1, # Center
+        spaceAfter=20
+    )
+    
+    h1_style = ParagraphStyle(
+        'DocH1',
+        parent=styles['Heading2'],
+        fontSize=15,
+        leading=19,
+        textColor=colors.HexColor('#1f4068'),
+        spaceBefore=15,
+        spaceAfter=10,
+        keepWithNext=True
+    )
+    
+    h2_style = ParagraphStyle(
+        'DocH2',
+        parent=styles['Heading3'],
+        fontSize=11,
+        leading=15,
+        textColor=colors.HexColor('#1f4068'),
+        spaceBefore=10,
+        spaceAfter=5,
+        keepWithNext=True
+    )
+    
+    body_style = ParagraphStyle(
+        'DocBody',
+        parent=styles['BodyText'],
+        fontSize=9,
+        leading=13,
+        textColor=colors.HexColor('#333333'),
+        spaceAfter=8
+    )
+
+    story = []
+    
+    # Title Page
+    story.append(Spacer(1, 40))
+    story.append(Paragraph("Retaining Wall Design & Verification Report", title_style))
+    story.append(Paragraph("<b>RT Wall Cantilever</b>", ParagraphStyle('SubTitle', parent=body_style, alignment=1, fontSize=11)))
+    story.append(Paragraph(f"Date: {datetime.date.today().strftime('%B %d, %Y')}", ParagraphStyle('DateStyle', parent=body_style, alignment=1)))
+    story.append(Spacer(1, 40))
+    story.append(Paragraph("This engineering report compiles the retaining wall dimensions, material properties, applied loads, stability safety factors, bearing capacity analysis, FEM settlement profiles, and pile foundation design checks.", body_style))
+    story.append(PageBreak())
+    
+    # 1. Inputs
+    story.append(Paragraph("1. Design Inputs & Parameters", h1_style))
+    story.append(Paragraph("<b>Wall Geometry:</b>", h2_style))
+    
+    geom_data = [
+        ["Parameter", "Symbol", "Value"],
+        ["Out-of-plane thickness", Paragraph("<i>t</i>", body_style), f"{t:.3f} m"],
+        ["Wall height", Paragraph("<i>H<sub>w</sub></i>", body_style), f"{Hw:.3f} m"],
+        ["Toe length", Paragraph("<i>L<sub>toe</sub></i>", body_style), f"{toe:.3f} m"],
+        ["Heel length", Paragraph("<i>L<sub>heel</sub></i>", body_style), f"{heel:.3f} m"],
+        ["Top wall thickness", Paragraph("<i>b<sub>top</sub></i>", body_style), f"{top_wall:.3f} m"],
+        ["Bottom wall thickness", Paragraph("<i>b<sub>bot</sub></i>", body_style), f"{bot_wall:.3f} m"],
+        ["Footing thickness", Paragraph("<i>h<sub>ftg</sub></i>", body_style), f"{h_ftg:.3f} m"]
+    ]
+    if include_shear_key:
+        geom_data.append(["Shear key distance", Paragraph("<i>x<sub>sk</sub></i>", body_style), f"{shear_key_distance:.3f} m"])
+        geom_data.append(["Shear key width", Paragraph("<i>w<sub>sk</sub></i>", body_style), f"{shear_key_width:.3f} m"])
+        geom_data.append(["Shear key thickness", Paragraph("<i>t<sub>sk</sub></i>", body_style), f"{shear_key_thickness:.3f} m"])
+        
+    t_geom = Table(geom_data, colWidths=[200, 100, 150])
+    t_geom.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#e1f5fe')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#0277bd')),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
+    ]))
+    story.append(t_geom)
+    story.append(Spacer(1, 10))
+    
+    # SNI Geotechnical Geometry checklist table
+    H_tot = Hw + h_ftg
+    story.append(Paragraph("<b>SNI Typical Geometry Verification Checklist:</b>", h2_style))
+    slope_val = taper / Hw if Hw > 0 else 0.0
+    
+    sni_data = [
+        ["Parameter Name", "Symbol", "Value", "SNI Requirement", "Status"],
+        ["Top Wall Thickness", Paragraph("<i>b<sub>top</sub></i>", body_style), f"{top_wall:.2f} m", ">= 0.30 m", "PASS" if top_wall >= 0.30 else "FAIL"],
+        ["Base Stem Thickness", Paragraph("<i>b<sub>bot</sub></i>", body_style), f"{bot_wall:.2f} m", f">= {0.1*H_tot:.2f} m", "PASS" if bot_wall >= 0.1*H_tot else "FAIL"],
+        ["Front Batter Slope", Paragraph("<i>slope</i>", body_style), f"{slope_val:.4f}", ">= 0.0208", "PASS" if slope_val >= (1.0/48.0) else "FAIL"],
+        ["Footing Width", Paragraph("<i>B</i>", body_style), f"{ftg:.2f} m", f"{0.4*H_tot:.2f} ~ {0.7*H_tot:.2f} m", "PASS" if 0.4*H_tot <= ftg <= 0.7*H_tot else "FAIL"],
+        ["Footing Thickness", Paragraph("<i>h<sub>ftg</sub></i>", body_style), f"{h_ftg:.2f} m", f"{H_tot/12:.2f} ~ {H_tot/10:.2f} m", "PASS" if H_tot/12 <= h_ftg <= H_tot/10 else "FAIL"],
+        ["Toe Slab Length", Paragraph("<i>L<sub>toe</sub></i>", body_style), f"{toe:.2f} m", f">= {ftg/3:.2f} m", "PASS" if toe >= ftg/3 else "FAIL"]
+    ]
+    t_sni = Table(sni_data, colWidths=[150, 60, 80, 110, 50])
+    t_sni.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#efebe9')),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
+    ]))
+    story.append(t_sni)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("<b>Soil & Water Parameters:</b>", h2_style))
+    soil_data = [
+        ["Parameter", "Symbol", "Value"],
+        ["Dry unit weight", Paragraph("<i>&gamma;<sub>dry</sub></i>", body_style), f"{gamma_soil_dry:.2f} kN/m³"],
+        ["Wet unit weight", Paragraph("<i>&gamma;<sub>wet</sub></i>", body_style), f"{gamma_soil_wet:.2f} kN/m³"],
+        ["Friction angle", Paragraph("<i>&phi;</i>", body_style), f"{phi:.1f}°"],
+        ["Soil cohesion", Paragraph("<i>c</i>", body_style), f"{c_soil:.1f} kPa"],
+        ["Surcharge load", Paragraph("<i>q</i>", body_style), f"{q:.2f} kPa"],
+        ["Soil height above heel", Paragraph("<i>h<sub>soil</sub></i>", body_style), f"{h_soil:.3f} m"],
+        ["Soil above toe", Paragraph("<i>h<sub>toe</sub></i>", body_style), f"{h_soil_toe:.3f} m"],
+        ["Water unit weight", Paragraph("<i>&gamma;<sub>w</sub></i>", body_style), f"{gamma_w:.2f} kN/m³"],
+        ["Water height behind wall", Paragraph("<i>H<sub>wtr</sub></i>", body_style), f"{Hwtr:.2f} m"],
+        ["Water height in front", Paragraph("<i>H<sub>wtr,front</sub></i>", body_style), f"{Hwtr_front:.3f} m"]
+    ]
+    t_soil = Table(soil_data, colWidths=[200, 100, 150])
+    t_soil.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f1f8e9')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#33691e')),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
+    ]))
+    story.append(t_soil)
+    story.append(PageBreak())
+    
+    # 2. Geometries image
+    story.append(Paragraph("2. Model & Geometry Diagrams", h1_style))
+    if os.path.exists("report_temp/model_geometry.png"):
+        story.append(Paragraph("<b>Wall Profile & Mesh Grid:</b>", h2_style))
+        story.append(Image("report_temp/model_geometry.png", width=450, height=280))
+        story.append(Spacer(1, 10))
+    if os.path.exists("report_temp/typical_dimensions.png"):
+        story.append(Paragraph("<b>SNI Geotechnical Dimensions Proportions Verification:</b>", h2_style))
+        story.append(Image("report_temp/typical_dimensions.png", width=450, height=280))
+    story.append(PageBreak())
+    
+    # 3. Loads
+    story.append(Paragraph("3. Applied Loads & Pressure Distributions", h1_style))
+    story.append(Paragraph("The pressure diagrams and corresponding analytical safety check calculations are shown below:", body_style))
+    
+    # Calculations
+    h_active = min(Hw, h_soil)
+    if surcharge_type == 'Strip Load':
+        q_top = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - h_active))['delta sigma x [kPa]'] if h_soil > 0 else 0.0
+        q_bot = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, h_soil)['delta sigma x [kPa]']
+    else:
+        q_top = Ka * q if h_soil > 0 else 0.0
+        q_bot = Ka * q if h_soil > 0 else 0.0
+    p_top_act = Ka * (gamma_soil_dry * max(0.0, h_soil - h_active)) + q_top if h_soil > 0 else 0.0
+    p_bot_act = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot if h_soil > 0 else 0.0
+    
+    FS_passive_val = 2.0
+    Kp_val = np.tan(np.radians(45.0 + phi / 2.0)) ** 2
+    p_p_top = (Kp_val * gamma_soil_dry * h_soil_toe) / FS_passive_val if h_soil_toe > 0 else 0.0
+    p_p_bot = (Kp_val * gamma_soil_dry * (h_soil_toe + h_ftg)) / FS_passive_val
+    
+    p_v = q_soil + q
+    p_w_back = gamma_w * Hwtr
+    p_w_front = gamma_w * Hwtr_front
+    p_upl = gamma_w * Hwtr
+
+    # Soil Lateral Pressure (Active & Passive)
+    if os.path.exists("report_temp/load_soil_lateral.png"):
+        story.append(Paragraph("<b>A. Soil Lateral Pressure (Active & Passive):</b>", h2_style))
+        story.append(Image("report_temp/load_soil_lateral.png", width=380, height=230))
+        story.append(Spacer(1, 5))
+        
+        story.append(Paragraph("• <b>Active Earth Pressure Coefficient Equation:</b>", body_style))
+        if os.path.exists("report_temp/eq_ka.png"):
+            story.append(Image("report_temp/eq_ka.png", width=220, height=33))
+        story.append(Paragraph(f"Result: <i>K<sub>a</sub></i> = {Ka:.4f}", body_style))
+        story.append(Spacer(1, 5))
+        
+        story.append(Paragraph("• <b>Active Pressure (Top of Stem):</b>", body_style))
+        if os.path.exists("report_temp/eq_p_act_top.png"):
+            story.append(Image("report_temp/eq_p_act_top.png", width=180, height=30))
+        story.append(Paragraph(f"Result: <i>p<sub>act,top</sub></i> = {p_top_act:.2f} kPa", body_style))
+        story.append(Spacer(1, 5))
+
+        story.append(Paragraph("• <b>Active Pressure (Bottom of Footing):</b>", body_style))
+        if os.path.exists("report_temp/eq_p_act_bot.png"):
+            story.append(Image("report_temp/eq_p_act_bot.png", width=340, height=30))
+        story.append(Paragraph(f"Result: <i>p<sub>act,bot</sub></i> = {p_bot_act:.2f} kPa", body_style))
+        story.append(Spacer(1, 5))
+
+        story.append(Paragraph("• <b>Passive Earth Pressure Coefficient Equation:</b>", body_style))
+        if os.path.exists("report_temp/eq_kp.png"):
+            story.append(Image("report_temp/eq_kp.png", width=220, height=33))
+        story.append(Paragraph(f"Result: <i>K<sub>p</sub></i> = {Kp_val:.4f}", body_style))
+        story.append(Spacer(1, 5))
+
+        story.append(Paragraph("• <b>Passive Pressure (Bottom of Footing):</b>", body_style))
+        if os.path.exists("report_temp/eq_p_pass_bot.png"):
+            story.append(Image("report_temp/eq_p_pass_bot.png", width=260, height=33))
+        story.append(Paragraph(f"Result: <i>p<sub>pass,bot</sub></i> = {p_p_bot:.2f} kPa (Mobilized, FS_pass = 2.0)", body_style))
+        story.append(Spacer(1, 10))
+
+    # Soil Vertical Weight & Surcharge
+    if os.path.exists("report_temp/load_soil_vertical.png"):
+        story.append(Paragraph("<b>B. Soil Vertical Weight & Surcharge:</b>", h2_style))
+        story.append(Image("report_temp/load_soil_vertical.png", width=380, height=230))
+        story.append(Spacer(1, 5))
+        story.append(Paragraph("• <b>Vertical Backfill Pressure Equation:</b>", body_style))
+        if os.path.exists("report_temp/eq_p_v_heel.png"):
+            story.append(Image("report_temp/eq_p_v_heel.png", width=180, height=30))
+        story.append(Paragraph(f"Result: <i>p<sub>v,heel</sub></i> = {p_v:.2f} kPa", body_style))
+        story.append(Spacer(1, 10))
+
+    # Hydrostatic Water Pressure
+    if os.path.exists("report_temp/load_hydrostatic.png"):
+        story.append(Paragraph("<b>C. Hydrostatic Water Pressure:</b>", h2_style))
+        story.append(Image("report_temp/load_hydrostatic.png", width=380, height=230))
+        story.append(Spacer(1, 5))
+        story.append(Paragraph("• <b>Hydrostatic Water Pressure Equation:</b>", body_style))
+        if os.path.exists("report_temp/eq_p_w.png"):
+            story.append(Image("report_temp/eq_p_w.png", width=140, height=30))
+        story.append(Paragraph(f"Result: Backwater <i>p<sub>w,back</sub></i> = {p_w_back:.2f} kPa, Frontwater <i>p<sub>w,front</sub></i> = {p_w_front:.2f} kPa", body_style))
+        story.append(Spacer(1, 10))
+
+    # Uplift Water Pressure under Base
+    if os.path.exists("report_temp/load_uplift.png"):
+        story.append(Paragraph("<b>D. Uplift Water Pressure under Base:</b>", h2_style))
+        story.append(Image("report_temp/load_uplift.png", width=380, height=230))
+        story.append(Spacer(1, 5))
+        story.append(Paragraph("• <b>Base Uplift Pressure Equation:</b>", body_style))
+        if os.path.exists("report_temp/eq_p_uplift.png"):
+            story.append(Image("report_temp/eq_p_uplift.png", width=180, height=30))
+        story.append(Paragraph(f"Result: <i>p<sub>uplift</sub></i> = {p_upl:.2f} kPa", body_style))
+        story.append(Spacer(1, 10))
+
+    # Pseudo-Static Seismic Forces
+    if os.path.exists("report_temp/load_seismic.png"):
+        story.append(Paragraph("<b>E. Pseudo-Static Seismic Forces:</b>", h2_style))
+        story.append(Image("report_temp/load_seismic.png", width=380, height=230))
+        story.append(Spacer(1, 10))
+
+    # Total / Combined Load System
+    if os.path.exists("report_temp/load_total.png"):
+        story.append(Paragraph("<b>F. Total / Combined Load System:</b>", h2_style))
+        story.append(Image("report_temp/load_total.png", width=380, height=230))
+        story.append(Spacer(1, 10))
+            
+    story.append(PageBreak())
+    
+    # 4. Stability report
+    story.append(Paragraph("4. Stability Verification", h1_style))
+    story.append(Paragraph("Safety factor analysis for overall retaining wall sliding, overturning, and slope failures:", body_style))
+    
+    # Equations
+    story.append(Paragraph("<b>Stability Verification Equations:</b>", h2_style))
+    story.append(Paragraph("• Sliding safety factor equation:", body_style))
+    if os.path.exists("report_temp/eq_sliding.png"):
+        story.append(Image("report_temp/eq_sliding.png", width=340, height=33))
+    story.append(Spacer(1, 5))
+    story.append(Paragraph("• Overturning safety factor equation:", body_style))
+    if os.path.exists("report_temp/eq_overturning.png"):
+        story.append(Image("report_temp/eq_overturning.png", width=260, height=33))
+    story.append(Spacer(1, 10))
+
+    stab_items = []
+    if 'FS_slide_global' in globals() and FS_slide_global is not None:
+        pass_slide = "PASS" if FS_slide_global >= 1.5 else "FAIL"
+        stab_items.append([Paragraph("Sliding Safety Factor Check", body_style), f"FS = {FS_slide_global:.3f}", f"Req >= 1.500", pass_slide])
+    if 'FS_ot_global' in globals() and FS_ot_global is not None:
+        pass_ot = "PASS" if FS_ot_global >= 1.5 else "FAIL"
+        stab_items.append([Paragraph("Overturning Safety Factor Check", body_style), f"FS = {FS_ot_global:.3f}", f"Req >= 1.500", pass_ot])
+    if 'fs_ssrm' in globals() and fs_ssrm is not None:
+        pass_ssrm = "PASS" if ssrm_pass else "FAIL"
+        stab_items.append([Paragraph("Slope Stability SSRM Safety Factor Check", body_style), f"FS = {fs_ssrm:.3f}", f"Req >= {1.1 if (PGA * FPGA) > 0 else 1.5}", pass_ssrm])
+        
+    t_stab = Table(stab_items, colWidths=[200, 100, 100, 50])
+    t_stab.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
+    ]))
+    story.append(t_stab)
+    story.append(Spacer(1, 15))
+    
+    if os.path.exists("report_temp/stability_ssrm.png"):
+        story.append(Paragraph("<b>2D SSRM Slip Surface Contour:</b>", h2_style))
+        story.append(Image("report_temp/stability_ssrm.png", width=450, height=180))
+        
+    story.append(PageBreak())
+    
+    # 5. Bearing Capacity Breakdown (if checked)
+    if enable_bearing:
+        story.append(Paragraph("5. Bearing Capacity & Consolidation Settlement", h1_style))
+        story.append(Paragraph("Footing geotechnical bearing capacity design check and consolidation settlement breakdown:", body_style))
+        
+        # Equations
+        story.append(Paragraph("<b>Bearing Stress & Settlement Equations:</b>", h2_style))
+        story.append(Paragraph("• Bearing contact stress:", body_style))
+        if os.path.exists("report_temp/eq_bearing_stress.png"):
+            story.append(Image("report_temp/eq_bearing_stress.png", width=250, height=33))
+        story.append(Spacer(1, 5))
+        story.append(Paragraph("• Bearing safety factor:", body_style))
+        if os.path.exists("report_temp/eq_bearing_fs.png"):
+            story.append(Image("report_temp/eq_bearing_fs.png", width=180, height=33))
+        story.append(Spacer(1, 5))
+        story.append(Paragraph("• Consolidation settlement:", body_style))
+        if os.path.exists("report_temp/eq_settlement.png"):
+            story.append(Image("report_temp/eq_settlement.png", width=280, height=33))
+        story.append(Spacer(1, 10))
+
+        bearing_items = []
+        if 'q_ult' in globals() and q_ult is not None:
+            bearing_items.append(["Ultimate soil bearing capacity (q_ult)", f"{q_ult:.2f} kPa"])
+            if 'sigma_max' in globals() and sigma_max is not None:
+                bearing_items.append(["Max bearing stress (sigma_max)", f"{sigma_max:.2f} kPa"])
+                bearing_items.append(["Bearing capacity Safety Factor", f"FS = {q_ult/sigma_max:.2f} (Req >= {FS_bearing:.1f})"])
+        if 'consol_settlement_mm' in globals() and consol_settlement_mm is not None:
+            pass_c = "PASS" if consol_pass else "FAIL"
+            bearing_items.append(["Consolidation Settlement", f"{consol_settlement_mm:.2f} mm (Allowable: {consol_allow_mm:.2f} mm) -> {pass_c}"])
+            
+        t_bear = Table(bearing_items, colWidths=[300, 150])
+        t_bear.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+            ('TOPPADDING', (0,0), (-1,-1), 5),
+        ]))
+        story.append(t_bear)
+        story.append(Spacer(1, 15))
+        
+    # 6. FEM Settlement
+    story.append(Paragraph("6. Finite Element Settlement & Base Displacements", h1_style))
+    story.append(Paragraph(f" Toe Settlement: <b>{settlement_toe_mm:.2f} mm</b>", body_style))
+    story.append(Paragraph(f" Heel Settlement: <b>{settlement_heel_mm:.2f} mm</b>", body_style))
+    pass_diff = "PASS" if diff_settlement_pass else "FAIL"
+    story.append(Paragraph(f" Differential Settlement: <b>{diff_settlement_mm:.2f} mm</b> (Allowable: 50.00 mm) -> <b>{pass_diff}</b>", body_style))
+    story.append(Paragraph(f" Rotational Tilt: <b>{rotation_deg:.4f}°</b>", body_style))
+    story.append(Spacer(1, 10))
+    
+    if 'df_bottom_disp' in globals() and df_bottom_disp is not None and not df_bottom_disp.empty:
+        story.append(Paragraph("<b>Footing Base Nodes Settlement Data:</b>", h2_style))
+        disp_headers = [["Node", "X Position (m)", "Disp X (mm)", "Disp Y (mm)", "Settlement (mm)"]]
+        for idx, row in df_bottom_disp.iterrows():
+            disp_headers.append([
+                str(int(row['Node'])),
+                f"{row['X Position (m)']:.3f}",
+                f"{row['Disp X (mm)']:.4f}",
+                f"{row['Disp Y (mm)']:.4f}",
+                f"{row['Settlement (mm)']:.4f}"
+            ])
+        t_disp = Table(disp_headers, colWidths=[60, 100, 90, 90, 110])
+        t_disp.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#eceff1')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER')
+        ]))
+        story.append(t_disp)
+
+    # 7. FE Stress and Stem Bending Moment plots
+    story.append(PageBreak())
+    story.append(Paragraph("7. Finite Element Stress & Bending Moment Contours", h1_style))
+    story.append(Paragraph("2D internal bending moments and finite element stress contours plotted on the retaining wall concrete cross-section:", body_style))
+    story.append(Spacer(1, 10))
+    if os.path.exists("report_temp/stem_bending_moment.png"):
+        story.append(Paragraph("<b>Stem Node Bending Moment Diagram (kN·m):</b>", h2_style))
+        story.append(Image("report_temp/stem_bending_moment.png", width=420, height=270))
+        story.append(Spacer(1, 15))
+    if os.path.exists("report_temp/stress_xx.png"):
+        story.append(Paragraph("<b>FE Stress Contour σ_xx (kN/m²):</b>", h2_style))
+        story.append(Image("report_temp/stress_xx.png", width=400, height=270))
+        story.append(Spacer(1, 15))
+    if os.path.exists("report_temp/stress_yy.png"):
+        story.append(Paragraph("<b>FE Stress Contour σ_yy (kN/m²):</b>", h2_style))
+        story.append(Image("report_temp/stress_yy.png", width=400, height=270))
+        
+    # 8. Pile foundation
+    if enable_pile:
+        story.append(PageBreak())
+        story.append(Paragraph("8. Pile Foundation Design & Verification", h1_style))
+        story.append(Paragraph("Geotechnical capacity, design parameters, and structural envelopes of the foundation piles:", body_style))
+        
+        story.append(Paragraph("<b>Pile Cross Section Geometry & Material Details:</b>", h2_style))
+        pile_param_data = [
+            ["Parameter Name", "Symbol", "Value"],
+            ["Pile Material Type", "-", pile_material],
+            ["Pile Cross-section Shape", "-", pile_shape],
+        ]
+        if pile_material == 'Concrete':
+            if pile_shape == 'Circle':
+                pile_param_data.append(["Pile Diameter", "d_pile", f"{diameter_pile:.3f} m"])
+                pile_param_data.append(["Concrete Cover", "d_c", f"{cover_pile:.1f} mm"])
+                pile_param_data.append(["Main Reinforcement", "-", f"{int(n_rebar_pile)} D{rebar_dia_pile}"])
+            else:
+                pile_param_data.append(["Pile Dimensions (dx × dy)", "h_pile × b_pile", f"{width_x_pile:.3f} m × {width_y_pile:.3f} m"])
+                pile_param_data.append(["Concrete Cover", "d_c", f"{cover_pile:.1f} mm"])
+                pile_param_data.append(["Main Reinforcement", "-", f"4 D{rebar_dia_pile} (Corners)"])
+        else:
+            if pile_shape == 'Circle':
+                pile_param_data.append(["Pile Diameter", "d_pile", f"{diameter_pile:.3f} m"])
+            else:
+                pile_param_data.append(["Pile Dimensions (dx × dy)", "h_pile × b_pile", f"{width_x_pile:.3f} m × {width_y_pile:.3f} m"])
+                
+        t_pile_params = Table(pile_param_data, colWidths=[200, 100, 150])
+        t_pile_params.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#eceff1')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(t_pile_params)
+        story.append(Spacer(1, 10))
+        
+        if os.path.exists("report_temp/pile_section.png"):
+            story.append(Paragraph("<b>Pile Concrete Section Drawing:</b>", h2_style))
+            story.append(Image("report_temp/pile_section.png", width=250, height=200))
+            story.append(Spacer(1, 10))
+
+        story.append(Paragraph("<b>Pile Structural Capacity Envelope limits:</b>", h2_style))
+        cap_items = [
+            ["Capacity Metric", "Allowable Value"],
+            ["Axial Compression Capacity", f"{Q_comp_allow:.2f} kN" if 'Q_comp_allow' in globals() else "N/A"],
+            ["Axial Tension Capacity", f"{Q_tens_allow:.2f} kN" if 'Q_tens_allow' in globals() else "N/A"],
+            ["Lateral Shear Capacity", f"{H_allow:.2f} kN" if 'H_allow' in globals() else "N/A"]
+        ]
+        t_cap = Table(cap_items, colWidths=[250, 200])
+        t_cap.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#eceff1')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(t_cap)
+        story.append(Spacer(1, 10))
+        
+        story.append(Paragraph("<b>Demands Verification checklist:</b>", h2_style))
+        story.append(Paragraph(f" Toe Pile Axial demand: <b>{P_toe:.2f} kN</b> -> <b>{'PASS' if pile_pass_toe_axial else 'FAIL'}</b>" if 'P_toe' in globals() else "", body_style))
+        story.append(Paragraph(f" Toe Pile Lateral shear demand: <b>{V_max_toe:.2f} kN</b> -> <b>{'PASS' if pile_pass_toe_lateral else 'FAIL'}</b>" if 'V_max_toe' in globals() else "", body_style))
+        story.append(Paragraph(f" Toe Pile Interaction Envelope check: <b>{'PASS' if pile_pass_toe_interaction else 'FAIL'}</b>" if 'pile_pass_toe_interaction' in globals() else "", body_style))
+        story.append(Spacer(1, 5))
+        story.append(Paragraph(f" Heel Pile Axial demand: <b>{P_heel:.2f} kN</b> -> <b>{'PASS' if pile_pass_heel_axial else 'FAIL'}</b>" if 'P_heel' in globals() else "", body_style))
+        story.append(Paragraph(f" Heel Pile Lateral shear demand: <b>{V_max_heel:.2f} kN</b> -> <b>{'PASS' if pile_pass_heel_lateral else 'FAIL'}</b>" if 'V_max_heel' in globals() else "", body_style))
+        story.append(Paragraph(f" Heel Pile Interaction Envelope check: <b>{'PASS' if pile_pass_heel_interaction else 'FAIL'}</b>" if 'pile_pass_heel_interaction' in globals() else "", body_style))
+        
+        story.append(PageBreak())
+        if os.path.exists("report_temp/pile_elevation.png"):
+            story.append(Paragraph("<b>Pile Foundation Schematic under Base:</b>", h2_style))
+            story.append(Image("report_temp/pile_elevation.png", width=380, height=310))
+            story.append(Spacer(1, 10))
+        if os.path.exists("report_temp/pile_winkler.png"):
+            story.append(Paragraph("<b>Pile Winkler Analysis Elastic Profiles:</b>", h2_style))
+            story.append(Image("report_temp/pile_winkler.png", width=450, height=300))
+            
+        story.append(PageBreak())
+        if os.path.exists("report_temp/pile_interaction.png"):
+            story.append(Paragraph("<b>Moment-Axial Interaction Envelope:</b>", h2_style))
+            story.append(Image("report_temp/pile_interaction.png", width=380, height=310))
+            story.append(Spacer(1, 10))
+            
+    doc.build(story)
+
+def generate_docx_report(output_path):
+    from docx import Document
+    from docx.shared import Inches, Pt
+    import os
+    import datetime
+
+    doc = Document()
+    
+    for section in doc.sections:
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+
+    title_p = doc.add_paragraph()
+    run = title_p.add_run("Retaining Wall Design & Verification Report\n")
+    run.bold = True
+    run.font.size = Pt(20)
+    run.font.name = 'Arial'
+    
+    run_sub = title_p.add_run("RT Wall Cantilever\n")
+    run_sub.italic = True
+    run_sub.font.size = Pt(12)
+    
+    run_date = title_p.add_run(f"Date: {datetime.date.today().strftime('%B %d, %Y')}")
+    run_date.font.size = Pt(10)
+    
+    doc.add_paragraph("This engineering report compiles the retaining wall dimensions, material properties, applied loads, stability safety factors, bearing capacity analysis, FEM settlement profiles, and pile foundation design checks.")
+    
+    # 1. Inputs
+    doc.add_heading("1. Design Inputs & Parameters", level=1)
+    
+    doc.add_heading("Wall Geometry", level=2)
+    t_geom = doc.add_table(rows=1, cols=3)
+    t_geom.style = 'Table Grid'
+    hdr = t_geom.rows[0].cells
+    hdr[0].text = 'Parameter'
+    hdr[1].text = 'Symbol'
+    hdr[2].text = 'Value'
+    
+    geom_items = [
+        ("Out-of-plane thickness", "t", f"{t:.3f} m"),
+        ("Wall height", "Hw", f"{Hw:.3f} m"),
+        ("Toe length", "L_toe", f"{toe:.3f} m"),
+        ("Heel length", "L_heel", f"{heel:.3f} m"),
+        ("Top wall thickness", "b_top", f"{top_wall:.3f} m"),
+        ("Bottom wall thickness", "b_bot", f"{bot_wall:.3f} m"),
+        ("Footing thickness", "h_ftg", f"{h_ftg:.3f} m")
+    ]
+    if include_shear_key:
+        geom_items.append(("Shear key distance", "x_sk", f"{shear_key_distance:.3f} m"))
+        geom_items.append(("Shear key width", "w_sk", f"{shear_key_width:.3f} m"))
+        geom_items.append(("Shear key thickness", "t_sk", f"{shear_key_thickness:.3f} m"))
+        
+    for p, s, v in geom_items:
+        row = t_geom.add_row()
+        row.cells[0].text = p
+        row.cells[1].text = s
+        row.cells[2].text = v
+        
+    # SNI checklist
+    doc.add_heading("SNI Typical Geometry Verification Checklist", level=2)
+    t_sni = doc.add_table(rows=1, cols=5)
+    t_sni.style = 'Table Grid'
+    hdr = t_sni.rows[0].cells
+    hdr[0].text = 'Parameter Name'
+    hdr[1].text = 'Symbol'
+    hdr[2].text = 'Value'
+    hdr[3].text = 'SNI Requirement'
+    hdr[4].text = 'Status'
+    
+    H_tot = Hw + h_ftg
+    slope_val = taper / Hw if Hw > 0 else 0.0
+    sni_items = [
+        ("Top Wall Thickness", "b_top", f"{top_wall:.2f} m", ">= 0.30 m", "PASS" if top_wall >= 0.30 else "FAIL"),
+        ("Base Stem Thickness", "b_bot", f"{bot_wall:.2f} m", f">= {0.1*H_tot:.2f} m", "PASS" if bot_wall >= 0.1*H_tot else "FAIL"),
+        ("Front Face Batter Slope", "slope", f"{slope_val:.4f}", ">= 0.0208", "PASS" if slope_val >= (1.0/48.0) else "FAIL"),
+        ("Footing Width", "B", f"{ftg:.2f} m", f"{0.4*H_tot:.2f} ~ {0.7*H_tot:.2f} m", "PASS" if 0.4*H_tot <= ftg <= 0.7*H_tot else "FAIL"),
+        ("Footing Thickness", "h_ftg", f"{h_ftg:.2f} m", f"{H_tot/12:.2f} ~ {H_tot/10:.2f} m", "PASS" if H_tot/12 <= h_ftg <= H_tot/10 else "FAIL"),
+        ("Toe Slab Length", "L_toe", f"{toe:.2f} m", f">= {ftg/3:.2f} m", "PASS" if toe >= ftg/3 else "FAIL")
+    ]
+    for p, s, v, req_val, st_val in sni_items:
+        row = t_sni.add_row()
+        row.cells[0].text = p
+        row.cells[1].text = s
+        row.cells[2].text = v
+        row.cells[3].text = req_val
+        row.cells[4].text = st_val
+
+    # Soil table
+    doc.add_heading("Soil & Water Parameters", level=2)
+    t_soil = doc.add_table(rows=1, cols=3)
+    t_soil.style = 'Table Grid'
+    hdr = t_soil.rows[0].cells
+    hdr[0].text = 'Parameter'
+    hdr[1].text = 'Symbol'
+    hdr[2].text = 'Value'
+    
+    soil_items = [
+        ("Dry unit weight", "γ_dry", f"{gamma_soil_dry:.2f} kN/m³"),
+        ("Wet unit weight", "γ_wet", f"{gamma_soil_wet:.2f} kN/m³"),
+        ("Friction angle", "φ", f"{phi:.1f}°"),
+        ("Soil cohesion", "c", f"{c_soil:.1f} kPa"),
+        ("Surcharge load", "q", f"{q:.2f} kPa"),
+        ("Soil height above heel", "h_soil", f"{h_soil:.3f} m"),
+        ("Soil above toe", "h_toe", f"{h_soil_toe:.3f} m"),
+        ("Water unit weight", "γ_w", f"{gamma_w:.2f} kN/m³"),
+        ("Water height behind wall", "Hwtr", f"{Hwtr:.2f} m"),
+        ("Water height in front", "Hwtr_front", f"{Hwtr_front:.3f} m")
+    ]
+    for p, s, v in soil_items:
+        row = t_soil.add_row()
+        row.cells[0].text = p
+        row.cells[1].text = s
+        row.cells[2].text = v
+        
+    # 2. Geometry diagram
+    doc.add_heading("2. Model & Geometry Diagrams", level=1)
+    if os.path.exists("report_temp/model_geometry.png"):
+        doc.add_heading("Wall Profile & Mesh Grid", level=2)
+        doc.add_picture("report_temp/model_geometry.png", width=Inches(4.5))
+    if os.path.exists("report_temp/typical_dimensions.png"):
+        doc.add_heading("Dimensions Proportions Verification", level=2)
+        doc.add_picture("report_temp/typical_dimensions.png", width=Inches(4.5))
+        
+    # 3. Applied Loads
+    doc.add_heading("3. Applied Loads & Pressure Distributions", level=1)
+    
+    h_active = min(Hw, h_soil)
+    if surcharge_type == 'Strip Load':
+        q_top = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - h_active))['delta sigma x [kPa]'] if h_soil > 0 else 0.0
+        q_bot = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, h_soil)['delta sigma x [kPa]']
+    else:
+        q_top = Ka * q if h_soil > 0 else 0.0
+        q_bot = Ka * q if h_soil > 0 else 0.0
+    p_top_act = Ka * (gamma_soil_dry * max(0.0, h_soil - h_active)) + q_top if h_soil > 0 else 0.0
+    p_bot_act = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot if h_soil > 0 else 0.0
+    
+    FS_passive_val = 2.0
+    Kp_val = np.tan(np.radians(45.0 + phi / 2.0)) ** 2
+    p_p_top = (Kp_val * gamma_soil_dry * h_soil_toe) / FS_passive_val if h_soil_toe > 0 else 0.0
+    p_p_bot = (Kp_val * gamma_soil_dry * (h_soil_toe + h_ftg)) / FS_passive_val
+    
+    p_v = q_soil + q
+    p_w_back = gamma_w * Hwtr
+    p_w_front = gamma_w * Hwtr_front
+    p_upl = gamma_w * Hwtr
+
+    # Soil Lateral Pressure
+    if os.path.exists("report_temp/load_soil_lateral.png"):
+        doc.add_heading("A. Soil Lateral Pressure (Active & Passive)", level=2)
+        doc.add_picture("report_temp/load_soil_lateral.png", width=Inches(4.5))
+        
+        doc.add_paragraph("Active Earth Coefficient Equation:")
+        if os.path.exists("report_temp/eq_ka.png"):
+            doc.add_picture("report_temp/eq_ka.png", width=Inches(2.0))
+        doc.add_paragraph(f"Result: Ka = {Ka:.4f}")
+        
+        doc.add_paragraph("Active Pressure (Top of Stem):")
+        if os.path.exists("report_temp/eq_p_act_top.png"):
+            doc.add_picture("report_temp/eq_p_act_top.png", width=Inches(1.8))
+        doc.add_paragraph(f"Result: p_act,top = {p_top_act:.2f} kPa")
+        
+        doc.add_paragraph("Active Pressure (Bottom of Footing):")
+        if os.path.exists("report_temp/eq_p_act_bot.png"):
+            doc.add_picture("report_temp/eq_p_act_bot.png", width=Inches(2.8))
+        doc.add_paragraph(f"Result: p_act,bot = {p_bot_act:.2f} kPa")
+        
+        doc.add_paragraph("Passive Earth Coefficient Equation:")
+        if os.path.exists("report_temp/eq_kp.png"):
+            doc.add_picture("report_temp/eq_kp.png", width=Inches(2.0))
+        doc.add_paragraph(f"Result: Kp = {Kp_val:.4f}")
+        
+        doc.add_paragraph("Passive Pressure (Bottom of Footing):")
+        if os.path.exists("report_temp/eq_p_pass_bot.png"):
+            doc.add_picture("report_temp/eq_p_pass_bot.png", width=Inches(2.4))
+        doc.add_paragraph(f"Result: p_pass,bot = {p_p_bot:.2f} kPa (Mobilized, FS_pass = 2.0)")
+
+    # Soil Vertical Weight
+    if os.path.exists("report_temp/load_soil_vertical.png"):
+        doc.add_heading("B. Soil Vertical Weight & Surcharge", level=2)
+        doc.add_picture("report_temp/load_soil_vertical.png", width=Inches(4.5))
+        doc.add_paragraph("Vertical Backfill Pressure Equation:")
+        if os.path.exists("report_temp/eq_p_v_heel.png"):
+            doc.add_picture("report_temp/eq_p_v_heel.png", width=Inches(1.8))
+        doc.add_paragraph(f"Result: p_v,heel = {p_v:.2f} kPa")
+
+    # Hydrostatic Water
+    if os.path.exists("report_temp/load_hydrostatic.png"):
+        doc.add_heading("C. Hydrostatic Water Pressure", level=2)
+        doc.add_picture("report_temp/load_hydrostatic.png", width=Inches(4.5))
+        doc.add_paragraph("Hydrostatic Water Pressure Equation:")
+        if os.path.exists("report_temp/eq_p_w.png"):
+            doc.add_picture("report_temp/eq_p_w.png", width=Inches(1.5))
+        doc.add_paragraph(f"Result: Backwater p_w,back = {p_w_back:.2f} kPa, Frontwater p_w,front = {p_w_front:.2f} kPa")
+
+    # Uplift
+    if os.path.exists("report_temp/load_uplift.png"):
+        doc.add_heading("D. Uplift Water Pressure under Base", level=2)
+        doc.add_picture("report_temp/load_uplift.png", width=Inches(4.5))
+        doc.add_paragraph("Base Uplift Pressure Equation:")
+        if os.path.exists("report_temp/eq_p_uplift.png"):
+            doc.add_picture("report_temp/eq_p_uplift.png", width=Inches(1.8))
+        doc.add_paragraph(f"Result: p_uplift = {p_upl:.2f} kPa")
+
+    # Seismic
+    if os.path.exists("report_temp/load_seismic.png"):
+        doc.add_heading("E. Pseudo-Static Seismic Forces", level=2)
+        doc.add_picture("report_temp/load_seismic.png", width=Inches(4.5))
+
+    # Total
+    if os.path.exists("report_temp/load_total.png"):
+        doc.add_heading("F. Total / Combined Load System", level=2)
+        doc.add_picture("report_temp/load_total.png", width=Inches(4.5))
+
+    # 4. Stability
+    doc.add_heading("4. Stability Analysis & Verification", level=1)
+    doc.add_heading("Stability Verification Equations", level=2)
+    doc.add_paragraph("Sliding safety factor equation:")
+    if os.path.exists("report_temp/eq_sliding.png"):
+         doc.add_picture("report_temp/eq_sliding.png", width=Inches(2.8))
+    doc.add_paragraph("Overturning safety factor equation:")
+    if os.path.exists("report_temp/eq_overturning.png"):
+         doc.add_picture("report_temp/eq_overturning.png", width=Inches(2.4))
+
+    if 'FS_slide_global' in globals() and FS_slide_global is not None:
+        doc.add_paragraph(f"Sliding FS = {FS_slide_global:.3f} (Required >= 1.5)")
+    if 'FS_ot_global' in globals() and FS_ot_global is not None:
+        doc.add_paragraph(f"Overturning FS = {FS_ot_global:.3f} (Required >= 1.5)")
+    if 'fs_ssrm' in globals() and fs_ssrm is not None:
+        doc.add_paragraph(f"Global Slope Stability SSRM FS = {fs_ssrm:.3f}")
+        
+    if os.path.exists("report_temp/stability_ssrm.png"):
+        doc.add_picture("report_temp/stability_ssrm.png", width=Inches(4.5))
+        
+    # 5. Bearing Capacity
+    if enable_bearing:
+        doc.add_heading("5. Bearing Capacity & Settlement", level=1)
+        doc.add_heading("Bearing Stress & Settlement Equations", level=2)
+        doc.add_paragraph("Bearing contact stress:")
+        if os.path.exists("report_temp/eq_bearing_stress.png"):
+             doc.add_picture("report_temp/eq_bearing_stress.png", width=Inches(2.2))
+        doc.add_paragraph("Bearing safety factor:")
+        if os.path.exists("report_temp/eq_bearing_fs.png"):
+             doc.add_picture("report_temp/eq_bearing_fs.png", width=Inches(1.8))
+        doc.add_paragraph("Consolidation settlement:")
+        if os.path.exists("report_temp/eq_settlement.png"):
+             doc.add_picture("report_temp/eq_settlement.png", width=Inches(2.5))
+
+        if 'q_ult' in globals() and q_ult is not None:
+            doc.add_paragraph(f"Ultimate bearing capacity: {q_ult:.2f} kPa")
+            doc.add_paragraph(f"Max bearing stress: {sigma_max:.2f} kPa")
+            doc.add_paragraph(f"Safety factor: {q_ult/sigma_max:.2f} (Required >= {FS_bearing:.1f})")
+        if 'consol_settlement_mm' in globals() and consol_settlement_mm is not None:
+            doc.add_paragraph(f"Consolidation Settlement: {consol_settlement_mm:.2f} mm (Allowable: {consol_allow_mm:.2f} mm)")
+
+    # 6. FEM
+    doc.add_heading("6. Finite Element Settlement & Base Displacements", level=1)
+    doc.add_paragraph(f"Toe Settlement: {settlement_toe_mm:.2f} mm")
+    doc.add_paragraph(f"Heel Settlement: {settlement_heel_mm:.2f} mm")
+    doc.add_paragraph(f"Differential Settlement: {diff_settlement_mm:.2f} mm (Allowable: 50.00 mm)")
+    
+    # 7. Stress Contours
+    doc.add_heading("7. Finite Element Stress & Bending Moment Contours", level=1)
+    if os.path.exists("report_temp/stem_bending_moment.png"):
+        doc.add_heading("Stem Node Bending Moment Diagram (kN·m)", level=2)
+        doc.add_picture("report_temp/stem_bending_moment.png", width=Inches(4.5))
+    if os.path.exists("report_temp/stress_xx.png"):
+        doc.add_heading("FE Stress Contour σ_xx (kN/m²)", level=2)
+        doc.add_picture("report_temp/stress_xx.png", width=Inches(4.5))
+    if os.path.exists("report_temp/stress_yy.png"):
+        doc.add_heading("FE Stress Contour σ_yy (kN/m²)", level=2)
+        doc.add_picture("report_temp/stress_yy.png", width=Inches(4.5))
+
+    # 8. Pile Foundation
+    if enable_pile:
+        doc.add_heading("8. Pile Foundation Design & Verification", level=1)
+        doc.add_heading("Pile Cross Section Geometry & Material Details", level=2)
+        
+        t_pile = doc.add_table(rows=1, cols=3)
+        t_pile.style = 'Table Grid'
+        hdr = t_pile.rows[0].cells
+        hdr[0].text = 'Parameter Name'
+        hdr[1].text = 'Symbol'
+        hdr[2].text = 'Value'
+        
+        pile_param_data = [
+            ["Pile Material Type", "-", pile_material],
+            ["Pile Cross-section Shape", "-", pile_shape],
+        ]
+        if pile_material == 'Concrete':
+            if pile_shape == 'Circle':
+                pile_param_data.append(["Pile Diameter", "d_pile", f"{diameter_pile:.3f} m"])
+                pile_param_data.append(["Concrete Cover", "d_c", f"{cover_pile:.1f} mm"])
+                pile_param_data.append(["Main Reinforcement", "-", f"{int(n_rebar_pile)} D{rebar_dia_pile}"])
+            else:
+                pile_param_data.append(["Pile Dimensions (dx × dy)", "h_pile × b_pile", f"{width_x_pile:.3f} m × {width_y_pile:.3f} m"])
+                pile_param_data.append(["Concrete Cover", "d_c", f"{cover_pile:.1f} mm"])
+                pile_param_data.append(["Main Reinforcement", "-", f"4 D{rebar_dia_pile} (Corners)"])
+        else:
+            if pile_shape == 'Circle':
+                pile_param_data.append(["Pile Diameter", "d_pile", f"{diameter_pile:.3f} m"])
+            else:
+                pile_param_data.append(["Pile Dimensions (dx × dy)", "h_pile × b_pile", f"{width_x_pile:.3f} m × {width_y_pile:.3f} m"])
+                
+        for p, s, v in pile_param_data:
+            row = t_pile.add_row()
+            row.cells[0].text = p
+            row.cells[1].text = s
+            row.cells[2].text = v
+
+        if os.path.exists("report_temp/pile_section.png"):
+            doc.add_heading("Pile Cross-Section Drawing", level=2)
+            doc.add_picture("report_temp/pile_section.png", width=Inches(3.5))
+
+        doc.add_heading("Pile Demands & Safety Factors Checklist", level=2)
+        if 'P_toe' in globals() and P_toe is not None:
+            doc.add_paragraph(f"Toe Pile Axial demand: {P_toe:.2f} kN")
+            doc.add_paragraph(f"Toe Pile Lateral demand: {V_max_toe:.2f} kN")
+        if 'P_heel' in globals() and P_heel is not None:
+            doc.add_paragraph(f"Heel Pile Axial demand: {P_heel:.2f} kN")
+            doc.add_paragraph(f"Heel Pile Lateral demand: {V_max_heel:.2f} kN")
+            
+        if os.path.exists("report_temp/pile_elevation.png"):
+            doc.add_heading("Pile Foundation Elevation Schematic", level=2)
+            doc.add_picture("report_temp/pile_elevation.png", width=Inches(4.5))
+        if os.path.exists("report_temp/pile_winkler.png"):
+            doc.add_heading("Pile Winkler Analysis Elastic Profiles", level=2)
+            doc.add_picture("report_temp/pile_winkler.png", width=Inches(4.5))
+        if os.path.exists("report_temp/pile_interaction.png"):
+            doc.add_heading("Moment-Axial Interaction Capacity Curve", level=2)
+            doc.add_picture("report_temp/pile_interaction.png", width=Inches(4.5))
+            
+    doc.save(output_path)
+
+@st.dialog("RT Wall Cantilever Report Export", width="large")
+def show_report_dialog():
+    st.markdown("### 📋 RT Wall Cantilever Design Report Export")
+    st.markdown("Generate and download a comprehensive engineering design report for the current wall configuration in Word (**DOCX**) or **PDF** format.")
+
+    with st.spinner("Preparing report assets and figures..."):
+        export_report_assets()
+        
+    pdf_filename = "retaining_wall_report.pdf"
+    docx_filename = "retaining_wall_report.docx"
+    
+    pdf_path = os.path.join("report_temp", pdf_filename)
+    docx_path = os.path.join("report_temp", docx_filename)
+    
+    col_docx, col_pdf = st.columns(2)
+    
+    with col_docx:
+        try:
+            generate_docx_report(docx_path)
+            with open(docx_path, "rb") as f:
+                docx_bytes = f.read()
+            st.download_button(
+                label="📝 Download Word Document (.docx)",
+                data=docx_bytes,
+                file_name=docx_filename,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True
+            )
+        except Exception as e_docx:
+            st.error(f"Error generating Word report: {e_docx}")
+            
+    with col_pdf:
+        try:
+            generate_pdf_reportlab(pdf_path)
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            st.download_button(
+                label="📕 Download PDF Report (.pdf)",
+                data=pdf_bytes,
+                file_name=pdf_filename,
+                mime="application/pdf",
+                use_container_width=True
+            )
+        except Exception as e_pdf:
+            st.error(f"Error generating PDF: {e_pdf}")
+            
+    st.markdown("---")
+    
+    # Safely extract preview values
+    slide_val = FS_slide_global if ('FS_slide_global' in globals() and FS_slide_global is not None) else 0.0
+    ot_val = FS_ot_global if ('FS_ot_global' in globals() and FS_ot_global is not None) else 0.0
+    slide_pass = "PASS" if slide_val >= 1.5 else "FAIL"
+    ot_pass = "PASS" if ot_val >= 1.5 else "FAIL"
+
+    st.markdown("#### 🔍 Design Summary Preview")
+    st.markdown(f"""
+    - **Wall Height**: {Hw:.3f} m | **Footing Width**: {ftg:.3f} m
+    - **Backfill Soil Friction Angle**: {phi:.1f}° | **Cohesion**: {c_soil:.1f} kPa
+    - **Sliding safety check**: **{slide_pass}** (FS = {slide_val:.3f})
+    - **Overturning safety check**: **{ot_pass}** (FS = {ot_val:.3f})
+    """)
+    
+    # Real-time base64 PDF Preview frame
+    try:
+        import base64
+        with open(pdf_path, "rb") as f:
+            pdf_data = f.read()
+        b64_pdf = base64.b64encode(pdf_data).decode('utf-8')
+        pdf_display = f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
+        st.markdown("#### 📄 PDF Inline Preview")
+        st.markdown(pdf_display, unsafe_allow_html=True)
+    except Exception as e_prev:
+        st.warning(f"Unable to load PDF preview frame: {e_prev}")
 # Page Configuration for wide layout
-st.set_page_config(layout="wide", page_title="Cantilever Retaining Wall Studio", page_icon="🧱")
+st.set_page_config(layout="wide", page_title="RT Wall Cantilever", page_icon="🧱")
+
 
 # CSS Injection for Premium Styling
 st.markdown("""
@@ -143,6 +1827,12 @@ ops.wipe()
 
 # We define the space in which we will create the model
 ops.model('basic','-ndm',2,'-ndf',2) # Displacements in 2 directions, out-of-plane displacements and rotations are restricted.
+
+# Sidebar header and Report button at the top
+st.sidebar.markdown("### 📋 Retaining Wall Report")
+if st.sidebar.button("📄 Generate Report", key="btn_report_sidebar", use_container_width=True):
+    st.session_state["trigger_report_dialog"] = True
+st.sidebar.markdown("---")
 
 # Streamlit sidebar inputs (re-runs app on change)
 tab_geom, tab_soil, tab_struct, tab_seismic, tab_reinf, tab_bearing, tab_pile = st.sidebar.tabs(['Geometry', 'Soil', 'Structure', 'Seismic', 'Concrete & Reinf', 'Bearing Capacity', 'Pile'])
@@ -2372,6 +4062,12 @@ if enable_pile:
         except Exception:
             pass
         fig_pile_sec.tight_layout()
+        try:
+            import os
+            os.makedirs("report_temp", exist_ok=True)
+            fig_pile_sec.savefig("report_temp/pile_section.png", dpi=150, bbox_inches='tight')
+        except Exception as e_save:
+            print("Error saving pile_section.png:", e_save)
         plt.close(fig_pile_sec)
 
         mi_res = sec_pile.moment_interaction_diagram(control_points=[('kappa0', 0.0), ('d_n', 1e-6)], progress_bar=False)
@@ -2445,7 +4141,7 @@ def status_span(ok):
 # 1. Title Banner
 st.markdown("""
 <div class="dashboard-header">
-    <h1>🧱 Cantilever Retaining Wall Designer</h1>
+    <h1>🧱 RT Wall Cantilever</h1>
     <p>Preliminary Cantilever Retaining Wall Design tool</p>
 </div>
 """, unsafe_allow_html=True)
@@ -3017,324 +4713,9 @@ with col_left:
 
         # Draw the model dynamically using drawsvg for loads
         try:
-            mult = 1000
-            y_shift = 0.8 * mult
-            x_shift = 1.5 * mult
-            max_height = max(Hw, h_soil, h_soil_toe, Hwtr, Hwtr_front) + h_ftg
-            
-            # Initialize drawing
-            d_load = draw.Drawing((ftg + 3.0)*mult, (max_height + 3.0)*mult, origin='bottom-left')
-            
-            # Helper for arrows
-            def draw_arrow_head(d, x1, y1, x2, y2, color='red', stroke_width=15, head_len=80, head_width=50):
-                d.append(draw.Line(x1, y1, x2, y2, stroke=color, stroke_width=stroke_width))
-                # Calculate arrowhead
-                dx = x2 - x1
-                dy = y2 - y1
-                L = np.hypot(dx, dy)
-                if L < 1e-6:
-                    return
-                ux = dx / L
-                uy = dy / L
-                # Perp vector
-                px = -uy
-                py = ux
-                # Arrow head points
-                ax = x2 - head_len * ux
-                ay = y2 - head_len * uy
-                
-                p1x = ax + head_width * px
-                p1y = ay + head_width * py
-                p2x = ax - head_width * px
-                p2y = ay - head_width * py
-                
-                d.append(draw.Lines(x2, y2, p1x, p1y, p2x, p2y, close=True, fill=color, stroke=color))
-
-            # 1. Background Soil outlines/shapes (very light)
-            # Soil dry
-            if h_soil > Hwtr:
-                d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
-                                     ftg*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
-                                     ftg*mult + x_shift, -(h_soil+h_ftg)*mult - y_shift,
-                                     (toe+bot_wall)*mult + x_shift, -(h_soil+h_ftg)*mult - y_shift,
-                                     close=True, fill='#5BC2A5', fill_opacity=0.06, stroke='#bdc3c7', stroke_width=2, stroke_dasharray='10,10'))
-            # Soil wet
-            if h_wet_height > 0:
-                d_load.append(draw.Lines(ftg*mult + x_shift, -h_ftg*mult - y_shift,
-                                     ftg*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
-                                     (toe+bot_wall)*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
-                                     (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
-                                     close=True, fill='#A6F527', fill_opacity=0.06, stroke='#bdc3c7', stroke_width=2, stroke_dasharray='10,10'))
-            # Soil toe
-            if h_soil_toe > 0:
-                d_load.append(draw.Lines(x_shift, -h_ftg*mult - y_shift,
-                                     toe*mult + x_shift, -h_ftg*mult - y_shift,
-                                     toe*mult + x_shift, -(h_ftg + h_soil_toe)*mult - y_shift,
-                                     x_shift, -(h_ftg + h_soil_toe)*mult - y_shift,
-                                     close=True, fill='#5BC2A5', fill_opacity=0.06, stroke='#bdc3c7', stroke_width=2, stroke_dasharray='10,10'))
-
-            # Water level lines (dashed)
-            if Hwtr_front > 0:
-                d_load.append(draw.Line(x_shift, -(h_ftg + Hwtr_front)*mult - y_shift,
-                                        toe*mult + x_shift, -(h_ftg + Hwtr_front)*mult - y_shift,
-                                        stroke='blue', stroke_width=10, stroke_dasharray='30,30'))
-            if Hwtr > 0:
-                d_load.append(draw.Line((toe+bot_wall)*mult + x_shift, -(h_ftg + Hwtr)*mult - y_shift,
-                                        ftg*mult + x_shift, -(h_ftg + Hwtr)*mult - y_shift,
-                                        stroke='blue', stroke_width=10, stroke_dasharray='30,30'))
-
-            # 2. Draw yellow wall
-            d_load.append(draw.Lines(x_shift,  -y_shift,
-                                x_shift,  -h_ftg*mult - y_shift,
-                                toe*mult + x_shift, -h_ftg*mult - y_shift,
-                                (toe+(taper/4))*mult + x_shift, -(h_ftg+(Hw/4))*mult - y_shift,
-                                (toe+(taper/2))*mult + x_shift, -(h_ftg+(Hw/2))*mult - y_shift,
-                                (toe+(taper*(3/4)))*mult + x_shift, -(h_ftg+(Hw*(3/4)))*mult - y_shift,
-                                (toe+taper)*mult + x_shift, -(h_ftg+Hw)*mult - y_shift,
-                                (toe+bot_wall)*mult + x_shift, -(h_ftg+Hw)*mult - y_shift,
-                                (toe+bot_wall)*mult + x_shift, -(h_ftg+(Hw*(3/4)))*mult - y_shift,
-                                (toe+bot_wall)*mult + x_shift, -(h_ftg+(Hw/2))*mult - y_shift,
-                                (toe+bot_wall)*mult + x_shift, -(h_ftg+(Hw/4))*mult - y_shift,
-                                (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
-                                ftg*mult + x_shift, -h_ftg*mult - y_shift,
-                                ftg*mult + x_shift, -y_shift,
-                                close=True,
-                                fill='#eeee00',
-                                stroke='black',
-                                stroke_width=30))
-
-            # Draw Shear Key in d_load if enabled
-            if include_shear_key:
-                sk_x1 = shear_key_distance * mult + x_shift
-                sk_x2 = (shear_key_distance + shear_key_width) * mult + x_shift
-                sk_y1 = -y_shift
-                sk_y2 = -y_shift + shear_key_thickness * mult
-                d_load.append(draw.Lines(sk_x1, sk_y1,
-                                    sk_x2, sk_y1,
-                                    sk_x2, sk_y2,
-                                    sk_x1, sk_y2,
-                                    close=True,
-                                    fill='#FFD700',
-                                    stroke='black',
-                                    stroke_width=20))
-
-            # 3. Dynamic loads
-            if selected_load_plot in ['soil lateral', 'total']:
-                # Soil lateral pressure profile: active soil + surcharge
-                h_active = min(Hw, h_soil)
-                if surcharge_type == 'Strip Load':
-                    q_top = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - h_active))['delta sigma x [kPa]'] if h_soil > 0 else 0.0
-                    q_bot = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, h_soil)['delta sigma x [kPa]']
-                else:
-                    q_top = Ka * q if h_soil > 0 else 0.0
-                    q_bot = Ka * q if h_soil > 0 else 0.0
-                
-                p_top = Ka * (gamma_soil_dry * max(0.0, h_soil - h_active)) + q_top if h_soil > 0 else 0.0
-                p_bot = Ka * (gamma_soil_dry * max(0.0, h_soil - Hwtr) + gamma_soil_wet * min(h_soil, Hwtr)) + q_bot if h_soil > 0 else 0.0
-                
-                # Passive soil resistance on toe side (mobilized using FS_passive_val = 2.0)
-                FS_passive_val = 2.0
-                Kp_val = np.tan(np.radians(45.0 + phi / 2.0)) ** 2
-                p_p_top = (Kp_val * gamma_soil_dry * h_soil_toe) / FS_passive_val if h_soil_toe > 0 else 0.0
-                p_p_bot = (Kp_val * gamma_soil_dry * (h_soil_toe + h_ftg)) / FS_passive_val
-                
-                # Scale: responsive scaling relative to reference of 30 kPa (auto-caps if larger)
-                p_max_lat = max(p_top, p_bot, p_p_bot, 1.0)
-                scale_lat = 1.2 * mult / max(30.0, p_max_lat)
-                
-                # Draw shaded active pressure block (only up to h_active)
-                d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -(h_ftg+h_active)*mult - y_shift,
-                                    (toe+bot_wall)*mult + x_shift + p_top*scale_lat, -(h_ftg+h_active)*mult - y_shift,
-                                    (toe+bot_wall)*mult + x_shift + p_bot*scale_lat, -h_ftg*mult - y_shift,
-                                    (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
-                                    close=True, fill='#E67E22', fill_opacity=0.3, stroke='#D35400', stroke_width=12))
-                
-                # Draw active pressure arrows
-                n_arr = 5
-                for i in range(n_arr):
-                    frac = i / (n_arr - 1)
-                    z_val = frac * h_active
-                    if h_soil > 0:
-                        hd = max(0.0, h_soil - max(z_val, Hwtr))
-                        hw = max(0.0, min(h_soil, Hwtr) - z_val)
-                        if surcharge_type == 'Strip Load':
-                            q_z = stresses_stripload_retainingwall_local(q, width_surcharge, offset_surcharge, h_soil, max(1e-5, h_soil - z_val))['delta sigma x [kPa]']
-                        else:
-                            q_z = Ka * q
-                        pz = Ka * (gamma_soil_dry * hd + gamma_soil_wet * hw) + q_z
-                    else:
-                        pz = 0.0
-                    y_z = -(h_ftg + z_val)*mult - y_shift
-                    x_start = (toe + bot_wall)*mult + x_shift + pz * scale_lat
-                    x_end = (toe + bot_wall)*mult + x_shift
-                    if pz > 0:
-                        draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#D35400', stroke_width=10, head_len=60, head_width=35)
-                
-                # Draw shaded passive pressure block on the left (toe side)
-                d_load.append(draw.Lines(x_shift, -(h_ftg + h_soil_toe)*mult - y_shift,
-                                    x_shift - p_p_top*scale_lat, -(h_ftg + h_soil_toe)*mult - y_shift,
-                                    x_shift - p_p_bot*scale_lat, -h_ftg*mult - y_shift,
-                                    x_shift, -h_ftg*mult - y_shift,
-                                    close=True, fill='#2ECC71', fill_opacity=0.3, stroke='#27AE60', stroke_width=12))
-                
-                # Draw passive pressure arrows (pointing right towards footing face, increasing with depth)
-                n_arr_p = 3
-                for i in range(n_arr_p):
-                    frac = i / (n_arr_p - 1)
-                    z_val = frac * (h_soil_toe + h_ftg)
-                    # depth from surface of toe soil is (h_soil_toe + h_ftg) - z_val
-                    depth_p = (h_soil_toe + h_ftg) - z_val
-                    pz_p = (Kp_val * gamma_soil_dry * depth_p) / FS_passive_val
-                    y_z = -z_val*mult - y_shift
-                    x_start = x_shift - pz_p * scale_lat
-                    x_end = x_shift
-                    if pz_p > 0:
-                        draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#27AE60', stroke_width=10, head_len=60, head_width=35)
-
-                # Label active pressures
-                d_load.append(draw.Text(f"{p_top:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_top*scale_lat + 0.20*mult, -(h_ftg+h_active)*mult - y_shift, fill='#D35400', font_weight='bold'))
-                d_load.append(draw.Text(f"{p_bot:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_bot*scale_lat + 0.20*mult, -h_ftg*mult - y_shift, fill='#D35400', font_weight='bold'))
-                
-                # Label passive pressures
-                d_load.append(draw.Text(f"{p_p_top:.2f} kPa", 0.20*mult, x_shift - p_p_top*scale_lat - 0.95*mult, -(h_ftg+h_soil_toe)*mult - y_shift, fill='#27AE60', font_weight='bold'))
-                d_load.append(draw.Text(f"{p_p_bot:.2f} kPa", 0.20*mult, x_shift - p_p_bot*scale_lat - 0.95*mult, -h_ftg*mult - y_shift, fill='#27AE60', font_weight='bold'))
-
-            if selected_load_plot in ['soil vertical', 'total']:
-                # Soil vertical load on heel: weight + surcharge
-                p_v = q_soil + q
-                # Scale: responsive scaling relative to reference of 150 kPa (auto-caps if larger)
-                scale_v = 0.8 * mult / max(150.0, p_v)
-                
-                # Draw shaded block above footing heel
-                d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
-                                    (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift - p_v*scale_v,
-                                    ftg*mult + x_shift, -h_ftg*mult - y_shift - p_v*scale_v,
-                                    ftg*mult + x_shift, -h_ftg*mult - y_shift,
-                                    close=True, fill='#F39C12', fill_opacity=0.3, stroke='#E67E22', stroke_width=12))
-                
-                # Draw downward arrows
-                n_arr = 5
-                for i in range(n_arr):
-                    frac = i / (n_arr - 1)
-                    x_pos = (toe + bot_wall + frac * heel)*mult + x_shift
-                    y_start = -h_ftg*mult - y_shift - p_v*scale_v
-                    y_end = -h_ftg*mult - y_shift
-                    draw_arrow_head(d_load, x_pos, y_start, x_pos, y_end, color='#E67E22', stroke_width=10, head_len=60, head_width=35)
-                
-                # Label pressure
-                d_load.append(draw.Text(f"{p_v:.2f} kPa", 0.20*mult, (toe+bot_wall + heel/2)*mult + x_shift, -h_ftg*mult - y_shift - p_v*scale_v - 0.22*mult, fill='#E67E22', text_anchor='middle', font_weight='bold'))
-
-            if selected_load_plot in ['hydrostatic', 'total']:
-                # Hydrostatic water pressure
-                p_w_back = gamma_w * Hwtr
-                p_w_front = gamma_w * Hwtr_front
-                p_max_w = max(p_w_back, p_w_front, 1.0)
-                scale_w = 1.2 * mult / max(20.0, p_max_w)
-                
-                # Back water pressure triangle
-                if Hwtr > 0:
-                    d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -(h_ftg+Hwtr)*mult - y_shift,
-                                        (toe+bot_wall)*mult + x_shift + p_w_back*scale_w, -h_ftg*mult - y_shift,
-                                        (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
-                                        close=True, fill='#3498DB', fill_opacity=0.3, stroke='#2980B9', stroke_width=12))
-                    # Back water arrows
-                    n_arr = 3
-                    for i in range(n_arr):
-                        frac = i / (n_arr - 1)
-                        z_val = frac * Hwtr
-                        pz_w = gamma_w * (Hwtr - z_val)
-                        y_z = -(h_ftg + z_val)*mult - y_shift
-                        x_start = (toe + bot_wall)*mult + x_shift + pz_w * scale_w
-                        x_end = (toe + bot_wall)*mult + x_shift
-                        if pz_w > 0:
-                            draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#2980B9', stroke_width=10, head_len=50, head_width=30)
-                    
-                    # Offset the label vertically to avoid overlap with lateral soil pressure at the base
-                    d_load.append(draw.Text(f"{p_w_back:.2f} kPa", 0.20*mult, (toe+bot_wall)*mult + x_shift + p_w_back*scale_w + 0.20*mult, -(h_ftg - 0.25)*mult - y_shift, fill='#2980B9', font_weight='bold'))
-
-                # Front water pressure triangle
-                if Hwtr_front > 0:
-                    d_load.append(draw.Lines(toe*mult + x_shift, -(h_ftg+Hwtr_front)*mult - y_shift,
-                                        toe*mult + x_shift - p_w_front*scale_w, -h_ftg*mult - y_shift,
-                                        toe*mult + x_shift, -h_ftg*mult - y_shift,
-                                        close=True, fill='#3498DB', fill_opacity=0.3, stroke='#2980B9', stroke_width=12))
-                    # Front water arrows (pointing right)
-                    n_arr = 3
-                    for i in range(n_arr):
-                        frac = i / (n_arr - 1)
-                        z_val = frac * Hwtr_front
-                        pz_w = gamma_w * (Hwtr_front - z_val)
-                        y_z = -(h_ftg + z_val)*mult - y_shift
-                        x_start = toe*mult + x_shift - pz_w * scale_w
-                        x_end = toe*mult + x_shift
-                        if pz_w > 0:
-                            draw_arrow_head(d_load, x_start, y_z, x_end, y_z, color='#2980B9', stroke_width=10, head_len=50, head_width=30)
-                    
-                    d_load.append(draw.Text(f"{p_w_front:.2f} kPa", 0.20*mult, toe*mult + x_shift - p_w_front*scale_w - 0.85*mult, -h_ftg*mult - y_shift, fill='#2980B9', font_weight='bold'))
-
-            if selected_load_plot in ['uplift', 'total']:
-                # Uplift pressure profile acting upwards under base
-                p_upl = gamma_w * Hwtr
-                if p_upl > 0:
-                    # Scale: responsive scaling relative to reference of 20 kPa (auto-caps if larger)
-                    scale_u = 0.6 * mult / max(20.0, p_upl)
-                    
-                    # Draw shaded uplift block below the base
-                    d_load.append(draw.Lines(x_shift, -y_shift,
-                                        x_shift, -y_shift + p_upl*scale_u,
-                                        ftg*mult + x_shift, -y_shift + p_upl*scale_u,
-                                        ftg*mult + x_shift, -y_shift,
-                                        close=True, fill='#9B59B6', fill_opacity=0.3, stroke='#8E44AD', stroke_width=12))
-                    
-                    # Draw upward arrows
-                    n_arr = 6
-                    for i in range(n_arr):
-                        frac = i / (n_arr - 1)
-                        x_pos = frac * ftg * mult + x_shift
-                        y_start = -y_shift + p_upl*scale_u
-                        y_end = -y_shift
-                        draw_arrow_head(d_load, x_pos, y_start, x_pos, y_end, color='#8E44AD', stroke_width=10, head_len=50, head_width=30)
-                        
-                    d_load.append(draw.Text(f"{p_upl:.2f} kPa", 0.20*mult, (ftg/2)*mult + x_shift, -y_shift + p_upl*scale_u + 0.25*mult, fill='#8E44AD', text_anchor='middle', font_weight='bold'))
-
-            if selected_load_plot in ['seismic', 'total']:
-                # Pseudo-static horizontal seismic forces acting left at centroids
-                if kh > 0:
-                    # Draw arrows at centroids of stem, base, and backfill
-                    # Stem centroid
-                    if stem_centroid[0] is not None:
-                        sx, sy = stem_centroid[0]*mult + x_shift, stem_centroid[1]*mult - y_shift
-                        draw_arrow_head(d_load, sx + 0.8*mult, sy, sx, sy, color='red', stroke_width=15, head_len=80, head_width=45)
-                        d_load.append(draw.Text("Seismic (stem)", 0.18*mult, sx + 0.95*mult, sy + 0.05*mult, fill='red', font_weight='bold'))
-                    # Base centroid
-                    if base_centroid[0] is not None:
-                        bx, by = base_centroid[0]*mult + x_shift, base_centroid[1]*mult - y_shift
-                        draw_arrow_head(d_load, bx + 0.8*mult, by, bx, by, color='red', stroke_width=15, head_len=80, head_width=45)
-                        d_load.append(draw.Text("Seismic (base)", 0.18*mult, bx + 0.95*mult, by + 0.05*mult, fill='red', font_weight='bold'))
-                    # Backfill centroids (dry / wet)
-                    if 'soil_dry_centroid' in locals() and soil_dry_centroid[0] is not None:
-                        sdx, sdy = soil_dry_centroid[0]*mult + x_shift, soil_dry_centroid[1]*mult - y_shift
-                        draw_arrow_head(d_load, sdx + 0.8*mult, sdy, sdx, sdy, color='red', stroke_width=15, head_len=80, head_width=45)
-                        d_load.append(draw.Text("Seismic (soil dry)", 0.18*mult, sdx + 0.95*mult, sdy + 0.05*mult, fill='red', font_weight='bold'))
-                    if 'soil_wet_centroid' in locals() and soil_wet_centroid[0] is not None:
-                        swx, swy = soil_wet_centroid[0]*mult + x_shift, soil_wet_centroid[1]*mult - y_shift
-                        draw_arrow_head(d_load, swx + 0.8*mult, swy, swx, swy, color='red', stroke_width=15, head_len=80, head_width=45)
-                        d_load.append(draw.Text("Seismic (soil wet)", 0.18*mult, swx + 0.95*mult, swy + 0.05*mult, fill='red', font_weight='bold'))
-
-            if selected_load_plot == 'total':
-                # Concrete weights downward at centroids
-                if base_centroid[0] is not None:
-                    bx, by = base_centroid[0]*mult + x_shift, base_centroid[1]*mult - y_shift
-                    draw_arrow_head(d_load, bx, by - 0.8*mult, bx, by, color='blue', stroke_width=15, head_len=80, head_width=45)
-                    d_load.append(draw.Text(f"W_base = {W_base:.1f} kN", 0.18*mult, bx, by - 1.0*mult, fill='blue', text_anchor='middle'))
-                if stem_centroid[0] is not None:
-                    sx, sy = stem_centroid[0]*mult + x_shift, stem_centroid[1]*mult - y_shift
-                    draw_arrow_head(d_load, sx, sy - 0.8*mult, sx, sy, color='blue', stroke_width=15, head_len=80, head_width=45)
-                    d_load.append(draw.Text(f"W_stem = {W_stem_rect:.1f} kN", 0.18*mult, sx, sy - 1.0*mult, fill='blue', text_anchor='middle'))
-
+            d_load = generate_load_drawing(selected_load_plot)
             d_load.set_render_size(800, 550)
             st.image(d_load.as_svg(), use_container_width=True)
-            
         except Exception as e:
             st.error(f"Error drawing SVG load diagram: {e}")
 
@@ -3364,11 +4745,11 @@ with col_left:
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Max Active Pressure (Base)", f"{p_bot:.2f} kPa")
-                st.metric("Max Passive Resistance (Base)", f"{p_p_bot:.2f} kPa", help="Mobilized passive earth pressure resistance (FS = 2.0)")
+                st.metric("Max Passive Resistance (Base)", f"{sigma_p_bot:.2f} kPa", help="Mobilized passive earth pressure resistance (FS = 2.0)")
             with col2:
                 top_label = "Active Pressure (Soil Surface)" if h_soil < Hw else "Min Active Pressure (Top)"
                 st.metric(top_label, f"{p_top:.2f} kPa")
-                st.metric("Passive Resistance (Soil Surface)", f"{p_p_top:.2f} kPa", help="Mobilized passive earth pressure resistance (FS = 2.0)")
+                st.metric("Passive Resistance (Soil Surface)", f"{sigma_p_top:.2f} kPa", help="Mobilized passive earth pressure resistance (FS = 2.0)")
             with col3:
                 net_soil_force = max(0.0, soil_lat_force - P_passive)
                 st.metric("Active Lateral Force", f"{soil_lat_force:.2f} kN")
@@ -3636,7 +5017,10 @@ with col_right:
                 ax.autoscale_view()
             except Exception:
                 pass
+            import os
+            os.makedirs("report_temp", exist_ok=True)
             fig_m.tight_layout()
+            fig_m.savefig("report_temp/stem_bending_moment.png", dpi=150, bbox_inches='tight')
             st.pyplot(fig_m)
             plt.close(fig_m)
         except Exception as e:
@@ -3669,6 +5053,7 @@ with col_right:
                 except Exception:
                     pass
                 fig_res.tight_layout()
+                fig_res.savefig("report_temp/stress_xx.png", dpi=150, bbox_inches='tight')
                 st.pyplot(fig_res)
                 plt.close(fig_res)
             except Exception as e:
@@ -3694,6 +5079,7 @@ with col_right:
                 except Exception:
                     pass
                 fig_res2.tight_layout()
+                fig_res2.savefig("report_temp/stress_yy.png", dpi=150, bbox_inches='tight')
                 st.pyplot(fig_res2)
                 plt.close(fig_res2)
             except Exception as e:
@@ -4062,6 +5448,12 @@ if enable_pile:
                 ax_s.grid(True)
                 
                 fig_winkler.tight_layout()
+                try:
+                    import os
+                    os.makedirs("report_temp", exist_ok=True)
+                    fig_winkler.savefig("report_temp/pile_winkler.png", dpi=150, bbox_inches='tight')
+                except Exception:
+                    pass
                 st.pyplot(fig_winkler)
             except Exception as e_w:
                 st.error(f"Error plotting Winkler response: {e_w}")
@@ -4083,6 +5475,12 @@ if enable_pile:
                 ax_int.legend(loc='upper right')
                 ax_int.grid(True)
                 fig_int.tight_layout()
+                try:
+                    import os
+                    os.makedirs("report_temp", exist_ok=True)
+                    fig_int.savefig("report_temp/pile_interaction.png", dpi=150, bbox_inches='tight')
+                except Exception:
+                    pass
                 st.pyplot(fig_int)
                 plt.close(fig_int)
             except Exception as e_i:
@@ -4244,8 +5642,18 @@ if ssrm_results is not None:
             ax.set_title(f"Viscoplastic Shear Strain (Failure Surface) (F={fs_str})", fontsize=11, fontweight='bold')
             
             fig_ssrm.tight_layout()
+            try:
+                import os
+                os.makedirs("report_temp", exist_ok=True)
+                fig_ssrm.savefig("report_temp/stability_ssrm.png", dpi=150, bbox_inches='tight')
+            except Exception:
+                pass
             st.pyplot(fig_ssrm)
             plt.close(fig_ssrm)
         except Exception as e_ssrm:
             st.error(f"Error plotting 2D SSRM: {e_ssrm}")
+
+if st.session_state.get("trigger_report_dialog", False):
+    st.session_state["trigger_report_dialog"] = False
+    show_report_dialog()
         

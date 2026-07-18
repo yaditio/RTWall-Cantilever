@@ -20,12 +20,19 @@ This software is not a certified engineering design tool and should not be used 
 - **Geotechnical Surcharge**: Integrates strip loads or uniform surcharges using Boussinesq distributions.
 - **Seismic Analysis**: Automatically applies pseudo-static seismic loads ($k_h = \text{PGA} \times \text{FPGA}$) to OpenSees nodes.
 - **Concrete Strength Verification**: Section capacity check for Stem Wall, Footing Toe, and Footing Heel.
+- **Mobilized Passive Earth Pressure**: Footing-toe passive resistance calculated via Rankine theory, reduced by a mobilization safety factor ($\text{FS} = 2.0$), and fully detailed via a step-by-step mathematical substitution breakdown in the UI.
+- **Optional Shear Key**: Configurable shear key protruding below the footing base, modeled in OpenSees using a Tri31 (3x3 grid) mesh with equalDOF constraints, and integrated into active/passive earth pressure calculations.
 - **Global Stability Analysis (2D SSRM)**: Evaluates the slope factor of safety (FS) using Finite Element Strength Reduction Method (SSRM) in `xslope` via the Griffiths & Lane (1999) displacement catastrophe sweep, displaying viscoplastic shear strain contour plots.
 - **Pile Foundation Design**:
   - Distributes total retaining wall axial demand and overturning moments into a 2-row pile system.
   - Generates pile cross-section plots and verifies bending-axial interaction envelopes using `concrete-properties`.
   - Performs Winkler lateral response (deflection, shear, moment profiles) under load demands using `openpile`.
-- **Interactive SVG Visualizations**: Proportionally scaled high-contrast drawing of the wall, soil layering, water tables, centroids, pile rows, and reaction forces.
+- **Interactive SVG Visualizations**: Proportionally scaled high-contrast drawing of the wall, soil layering, water tables, centroids, pile rows, and reaction forces (using unified vertical and horizontal scaling).
+- **Engineering Report Export**:
+  - **Inline PDF Preview**: Real-time PDF inline viewer frame embedded directly inside the Streamlit user interface.
+  - **Multi-Format Export**: One-click generation and download of professional engineering design reports in **PDF** (via ReportLab) and Word (**DOCX**) format.
+  - **LaTeX Symbol Math**: Embedded LaTeX math equations (`eq_*.png`) showing analytical safety factor derivations and calculations.
+  - **Pile Cross-Section & Parameters**: Compiles concrete pile cross-section drawings and detailed geometry parameters directly into the export layouts.
 
 ---
 
