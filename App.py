@@ -165,19 +165,17 @@ def generate_load_drawing(selected_load_plot):
 
     # 1. Background Soil outlines/shapes (very light)
     # Soil dry
-    if h_soil > Hwtr:
-        d_load.append(draw.Lines((toe+bot_wall)*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
-                             ftg*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
-                             ftg*mult + x_shift, -(h_soil+h_ftg)*mult - y_shift,
-                             (toe+bot_wall)*mult + x_shift, -(h_soil+h_ftg)*mult - y_shift,
-                             close=True, fill='#5BC2A5', fill_opacity=0.06, stroke='#bdc3c7', stroke_width=2, stroke_dasharray='10,10'))
+    if 'soil_dry_poly' in globals() and soil_dry_poly:
+        pts_dry = []
+        for px, py in soil_dry_poly:
+            pts_dry.extend([px*mult + x_shift, py*mult - y_shift])
+        d_load.append(draw.Lines(*pts_dry, close=True, fill='#5BC2A5', fill_opacity=0.06, stroke='#bdc3c7', stroke_width=2, stroke_dasharray='10,10'))
     # Soil wet
-    if h_wet_height > 0:
-        d_load.append(draw.Lines(ftg*mult + x_shift, -h_ftg*mult - y_shift,
-                             ftg*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
-                             (toe+bot_wall)*mult + x_shift, -(h_wet_height+h_ftg)*mult - y_shift,
-                             (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
-                             close=True, fill='#A6F527', fill_opacity=0.06, stroke='#bdc3c7', stroke_width=2, stroke_dasharray='10,10'))
+    if 'soil_wet_poly' in globals() and soil_wet_poly:
+        pts_wet = []
+        for px, py in soil_wet_poly:
+            pts_wet.extend([px*mult + x_shift, py*mult - y_shift])
+        d_load.append(draw.Lines(*pts_wet, close=True, fill='#A6F527', fill_opacity=0.06, stroke='#bdc3c7', stroke_width=2, stroke_dasharray='10,10'))
     # Soil toe
     if h_soil_toe > 0:
         d_load.append(draw.Lines(x_shift, -h_ftg*mult - y_shift,
@@ -197,20 +195,44 @@ def generate_load_drawing(selected_load_plot):
                                 stroke='blue', stroke_width=10, stroke_dasharray='30,30'))
 
     # 2. Draw yellow wall
-    d_load.append(draw.Lines(x_shift,  -y_shift,
-                        x_shift,  -h_ftg*mult - y_shift,
-                        toe*mult + x_shift, -h_ftg*mult - y_shift,
-                        (toe+(taper/4))*mult + x_shift, -(h_ftg+(Hw/4))*mult - y_shift,
-                        (toe+(taper/2))*mult + x_shift, -(h_ftg+(Hw/2))*mult - y_shift,
-                        (toe+(taper*(3/4)))*mult + x_shift, -(h_ftg+(Hw*(3/4)))*mult - y_shift,
-                        (toe+taper)*mult + x_shift, -(h_ftg+Hw)*mult - y_shift,
-                        (toe+bot_wall)*mult + x_shift, -(h_ftg+Hw)*mult - y_shift,
-                        (toe+bot_wall)*mult + x_shift, -(h_ftg+(Hw*(3/4)))*mult - y_shift,
-                        (toe+bot_wall)*mult + x_shift, -(h_ftg+(Hw/2))*mult - y_shift,
-                        (toe+bot_wall)*mult + x_shift, -(h_ftg+(Hw/4))*mult - y_shift,
-                        (toe+bot_wall)*mult + x_shift, -h_ftg*mult - y_shift,
-                        ftg*mult + x_shift, -h_ftg*mult - y_shift,
-                        ftg*mult + x_shift, -y_shift,
+    if taper_direction == 'Toe-facing':
+        stem_pts_local = [
+            ((toe + taper/4.0), -(h_ftg + Hw/4.0)),
+            ((toe + taper/2.0), -(h_ftg + Hw/2.0)),
+            ((toe + taper*3.0/4.0), -(h_ftg + Hw*3.0/4.0)),
+            ((toe + taper), -(h_ftg + Hw)),
+            ((toe + bot_wall), -(h_ftg + Hw)),
+            ((toe + bot_wall), -(h_ftg + Hw*3.0/4.0)),
+            ((toe + bot_wall), -(h_ftg + Hw/2.0)),
+            ((toe + bot_wall), -(h_ftg + Hw/4.0)),
+            ((toe + bot_wall), -h_ftg)
+        ]
+    else:
+        stem_pts_local = [
+            (toe, -(h_ftg + Hw/4.0)),
+            (toe, -(h_ftg + Hw/2.0)),
+            (toe, -(h_ftg + Hw*3.0/4.0)),
+            (toe, -(h_ftg + Hw)),
+            ((toe + top_wall), -(h_ftg + Hw)),
+            ((toe + bot_wall - taper*3.0/4.0), -(h_ftg + Hw*3.0/4.0)),
+            ((toe + bot_wall - taper/2.0), -(h_ftg + Hw/2.0)),
+            ((toe + bot_wall - taper/4.0), -(h_ftg + Hw/4.0)),
+            ((toe + bot_wall), -h_ftg)
+        ]
+    
+    wall_points_load = [
+        x_shift,  -y_shift,
+        x_shift,  -h_ftg*mult - y_shift,
+        toe*mult + x_shift, -h_ftg*mult - y_shift
+    ]
+    for px, py in stem_pts_local:
+        wall_points_load.extend([px*mult + x_shift, py*mult - y_shift])
+    wall_points_load.extend([
+        ftg*mult + x_shift, -h_ftg*mult - y_shift,
+        ftg*mult + x_shift, -y_shift
+    ])
+    
+    d_load.append(draw.Lines(*wall_points_load,
                         close=True,
                         fill='#eeee00',
                         stroke='black',
@@ -582,8 +604,10 @@ def build_latex_code():
     tex.append(r"\midrule")
     tex.append(f"Top Wall Thickness & $b_{{top}}$ & {top_wall:.2f} m & $\\ge 0.30$ m & {{'PASS' if top_wall >= 0.30 else 'FAIL'}} \\\\")
     tex.append(f"Base Stem Thickness & $b_{{bot}}$ & {bot_wall:.2f} m & $\\ge 0.1 H$ ({0.1*H_tot:.2f} m) & {{'PASS' if bot_wall >= 0.1*H_tot else 'FAIL'}} \\\\")
-    slope_val = taper / Hw if Hw > 0 else 0.0
-    tex.append(f"Front Face Batter Slope & $\\text{{slope}}$ & {slope_val:.4f} & $\\ge 1:48$ (0.0208) & {{'PASS' if slope_val >= (1.0/48.0) else 'FAIL'}} \\\\")
+    slope_val = taper / Hw if (Hw > 0 and taper_direction == 'Toe-facing') else 0.0
+    slope_status = 'PASS' if (taper_direction == 'Heel-facing' or slope_val >= (1.0/48.0)) else 'FAIL'
+    slope_req = r"\ge 1:48\text{ (0.0208)}" if taper_direction == 'Toe-facing' else "N/A (Vertical)"
+    tex.append(f"Front Face Batter Slope & $\\text{{slope}}$ & {slope_val:.4f} & ${slope_req}$ & {slope_status} \\\\")
     tex.append(f"Footing Width & $B$ & {ftg:.2f} m & $0.4 H \\sim 0.7 H$ ({0.4*H_tot:.2f} $\\sim$ {0.7*H_tot:.2f} m) & {{'PASS' if 0.4*H_tot <= ftg <= 0.7*H_tot else 'FAIL'}} \\\\")
     tex.append(f"Footing Thickness & $h_{{ftg}}$ & {h_ftg:.2f} m & $H/12 \\sim H/10$ ({H_tot/12:.2f} $\\sim$ {H_tot/10:.2f} m) & {{'PASS' if H_tot/12 <= h_ftg <= H_tot/10 else 'FAIL'}} \\\\")
     tex.append(f"Toe Slab Length & $L_{{toe}}$ & {toe:.2f} m & $\\ge B/3$ ({ftg/3:.2f} m) & {{'PASS' if toe >= ftg/3 else 'FAIL'}} \\\\")
@@ -994,13 +1018,15 @@ def generate_pdf_reportlab(output_path):
     # SNI Geotechnical Geometry checklist table
     H_tot = Hw + h_ftg
     story.append(Paragraph("<b>SNI Typical Geometry Verification Checklist:</b>", h2_style))
-    slope_val = taper / Hw if Hw > 0 else 0.0
+    slope_val = taper / Hw if (Hw > 0 and taper_direction == 'Toe-facing') else 0.0
+    slope_status = "PASS" if (taper_direction == 'Heel-facing' or slope_val >= (1.0/48.0)) else "FAIL"
+    slope_req = ">= 0.0208" if taper_direction == 'Toe-facing' else "N/A (Vertical)"
     
     sni_data = [
         ["Parameter Name", "Symbol", "Value", "SNI Requirement", "Status"],
         ["Top Wall Thickness", Paragraph("<i>b<sub>top</sub></i>", body_style), f"{top_wall:.2f} m", ">= 0.30 m", "PASS" if top_wall >= 0.30 else "FAIL"],
         ["Base Stem Thickness", Paragraph("<i>b<sub>bot</sub></i>", body_style), f"{bot_wall:.2f} m", f">= {0.1*H_tot:.2f} m", "PASS" if bot_wall >= 0.1*H_tot else "FAIL"],
-        ["Front Batter Slope", Paragraph("<i>slope</i>", body_style), f"{slope_val:.4f}", ">= 0.0208", "PASS" if slope_val >= (1.0/48.0) else "FAIL"],
+        ["Front Batter Slope", Paragraph("<i>slope</i>", body_style), f"{slope_val:.4f}", slope_req, slope_status],
         ["Footing Width", Paragraph("<i>B</i>", body_style), f"{ftg:.2f} m", f"{0.4*H_tot:.2f} ~ {0.7*H_tot:.2f} m", "PASS" if 0.4*H_tot <= ftg <= 0.7*H_tot else "FAIL"],
         ["Footing Thickness", Paragraph("<i>h<sub>ftg</sub></i>", body_style), f"{h_ftg:.2f} m", f"{H_tot/12:.2f} ~ {H_tot/10:.2f} m", "PASS" if H_tot/12 <= h_ftg <= H_tot/10 else "FAIL"],
         ["Toe Slab Length", Paragraph("<i>L<sub>toe</sub></i>", body_style), f"{toe:.2f} m", f">= {ftg/3:.2f} m", "PASS" if toe >= ftg/3 else "FAIL"]
@@ -1445,11 +1471,13 @@ def generate_docx_report(output_path):
     hdr[4].text = 'Status'
     
     H_tot = Hw + h_ftg
-    slope_val = taper / Hw if Hw > 0 else 0.0
+    slope_val = taper / Hw if (Hw > 0 and taper_direction == 'Toe-facing') else 0.0
+    slope_status = "PASS" if (taper_direction == 'Heel-facing' or slope_val >= (1.0/48.0)) else "FAIL"
+    slope_req = ">= 0.0208" if taper_direction == 'Toe-facing' else "N/A (Vertical)"
     sni_items = [
         ("Top Wall Thickness", "b_top", f"{top_wall:.2f} m", ">= 0.30 m", "PASS" if top_wall >= 0.30 else "FAIL"),
         ("Base Stem Thickness", "b_bot", f"{bot_wall:.2f} m", f">= {0.1*H_tot:.2f} m", "PASS" if bot_wall >= 0.1*H_tot else "FAIL"),
-        ("Front Face Batter Slope", "slope", f"{slope_val:.4f}", ">= 0.0208", "PASS" if slope_val >= (1.0/48.0) else "FAIL"),
+        ("Front Face Batter Slope", "slope", f"{slope_val:.4f}", slope_req, slope_status),
         ("Footing Width", "B", f"{ftg:.2f} m", f"{0.4*H_tot:.2f} ~ {0.7*H_tot:.2f} m", "PASS" if 0.4*H_tot <= ftg <= 0.7*H_tot else "FAIL"),
         ("Footing Thickness", "h_ftg", f"{h_ftg:.2f} m", f"{H_tot/12:.2f} ~ {H_tot/10:.2f} m", "PASS" if H_tot/12 <= h_ftg <= H_tot/10 else "FAIL"),
         ("Toe Slab Length", "L_toe", f"{toe:.2f} m", f">= {ftg/3:.2f} m", "PASS" if toe >= ftg/3 else "FAIL")
@@ -1844,6 +1872,7 @@ with tab_geom:
     heel = st.number_input('Heel length (m)', value=0.8, step=0.01, format="%.3f")
     top_wall = st.number_input('Top wall thickness (m)', value=0.3, step=0.01, format="%.3f")
     bot_wall = st.number_input('Bottom wall thickness (m)', value=0.4, step=0.01, format="%.3f")
+    taper_direction = st.selectbox('Taper Direction', ['Toe-facing', 'Heel-facing'], index=0, help="Toe-facing tapers the left face of the stem; Heel-facing tapers the right (backfill) face of the stem.")
     h_ftg = st.number_input('Footing thickness (m)', value=0.3, step=0.01, format="%.3f")
     # Shear key optional parameters
     include_shear_key = st.checkbox('Include Shear Key', value=False)
@@ -2042,6 +2071,37 @@ ftg = toe + heel + bot_wall  # total footing length
 taper = bot_wall - top_wall
 taper_length = np.sqrt(taper**2 + Hw**2)
 
+# Taper-dependent coordinate bounds
+top_left_stem_x = toe + taper if taper_direction == 'Toe-facing' else toe
+top_right_stem_x = toe + bot_wall if taper_direction == 'Toe-facing' else toe + top_wall
+batter_mid_x = toe + taper/2.0 if taper_direction == 'Toe-facing' else toe + bot_wall - taper/2.0
+
+# Generic stem points for SVG drawings (elevation coordinates relative to footing top at y=0)
+if taper_direction == 'Toe-facing':
+    stem_pts = [
+        ((toe + taper/4.0), -(h_ftg + Hw/4.0)),
+        ((toe + taper/2.0), -(h_ftg + Hw/2.0)),
+        ((toe + taper*3.0/4.0), -(h_ftg + Hw*3.0/4.0)),
+        ((toe + taper), -(h_ftg + Hw)),
+        ((toe + bot_wall), -(h_ftg + Hw)),
+        ((toe + bot_wall), -(h_ftg + Hw*3.0/4.0)),
+        ((toe + bot_wall), -(h_ftg + Hw/2.0)),
+        ((toe + bot_wall), -(h_ftg + Hw/4.0)),
+        ((toe + bot_wall), -h_ftg)
+    ]
+else:
+    stem_pts = [
+        (toe, -(h_ftg + Hw/4.0)),
+        (toe, -(h_ftg + Hw/2.0)),
+        (toe, -(h_ftg + Hw*3.0/4.0)),
+        (toe, -(h_ftg + Hw)),
+        ((toe + top_wall), -(h_ftg + Hw)),
+        ((toe + bot_wall - taper*3.0/4.0), -(h_ftg + Hw*3.0/4.0)),
+        ((toe + bot_wall - taper/2.0), -(h_ftg + Hw/2.0)),
+        ((toe + bot_wall - taper/4.0), -(h_ftg + Hw/4.0)),
+        ((toe + bot_wall), -h_ftg)
+    ]
+
 # Build a refined mesh by splitting the original triangles while keeping
 # the overall outer geometry unchanged. We create 8 nodes along the
 # footing (bottom and top of footing) and 8 stem layers (back/front
@@ -2092,8 +2152,12 @@ stem_pairs = []
 shear_node_ids = []  # will hold shear key node ids if enabled
 for i in range(1, 9):
     z = h_ftg + Hw * (i / 8.0)
-    back_x = toe + taper * (i / 8.0)
-    front_x = toe + bot_wall
+    if taper_direction == 'Toe-facing':
+        back_x = toe + taper * (i / 8.0)
+        front_x = toe + bot_wall
+    else:
+        back_x = toe
+        front_x = toe + bot_wall - taper * (i / 8.0)
     back_id = num_foot_nodes * 2 + (2 * i - 1)
     front_id = num_foot_nodes * 2 + (2 * i)
     ops.node(back_id, float(back_x), float(z))
@@ -2271,19 +2335,30 @@ def polygon_centroid(vertices):
     Cy /= (6.0 * A)
     return (Cx, Cy)
 
-# Build stem polygon (geometry of the wall above top-of-footing)
-stem_poly = []
-try:
-    stem_poly.append((toe, -h_ftg))
-    stem_poly.append((toe + taper/4.0, -(h_ftg + Hw/4.0)))
-    stem_poly.append((toe + taper/2.0, -(h_ftg + Hw/2.0)))
-    stem_poly.append((toe + (taper * 3.0 / 4.0), -(h_ftg + Hw * 3.0 / 4.0)))
-    stem_poly.append((toe + taper, -(h_ftg + Hw)))
-    stem_poly.append((toe + bot_wall, -(h_ftg + Hw)))
-    stem_poly.append((toe + bot_wall, -h_ftg))
-except Exception:
-    stem_poly = []
+def polygon_area_and_centroid(vertices):
+    # vertices: list of (x,y) tuples (must be closed or will close)
+    if not vertices:
+        return 0.0, (None, None)
+    A = 0.0
+    Cx = 0.0
+    Cy = 0.0
+    n = len(vertices)
+    for i in range(n):
+        x0, y0 = vertices[i]
+        x1, y1 = vertices[(i + 1) % n]
+        cross = x0 * y1 - x1 * y0
+        A += cross
+        Cx += (x0 + x1) * cross
+        Cy += (y0 + y1) * cross
+    A *= 0.5
+    if abs(A) < 1e-12:
+        return 0.0, (0.0, 0.0)
+    Cx /= (6.0 * A)
+    Cy /= (6.0 * A)
+    return abs(A), (Cx, Cy)
 
+# Build stem polygon (geometry of the wall above top-of-footing)
+stem_poly = [(toe, -h_ftg)] + stem_pts[:5] + [(toe + bot_wall, -h_ftg)]
 stem_centroid = (None, None)
 if stem_poly:
     stem_centroid = polygon_centroid(stem_poly)
@@ -2294,10 +2369,38 @@ base_centroid = polygon_centroid(base_poly)
 
 # Soil (heel block) polygons for drawing and centroids
 h_wet_height = min(h_soil, Hwtr)
-soil_dry_poly = [(toe + bot_wall, -(h_ftg + h_wet_height)), (float(ftg), -(h_ftg + h_wet_height)), (float(ftg), -(h_ftg + h_soil)), (toe + bot_wall, -(h_ftg + h_soil))] if h_soil > Hwtr else []
-soil_dry_centroid = polygon_centroid(soil_dry_poly) if soil_dry_poly else (None, None)
+if taper_direction == 'Toe-facing':
+    soil_wet_poly = [(toe + bot_wall, -h_ftg), (float(ftg), -h_ftg), (float(ftg), -(h_ftg + h_wet_height)), (toe + bot_wall, -(h_ftg + h_wet_height))] if h_wet_height > 0 else []
+    if h_soil > Hwtr:
+        soil_dry_poly = [(toe + bot_wall, -(h_ftg + h_wet_height)), (float(ftg), -(h_ftg + h_wet_height)), (float(ftg), -(h_ftg + h_soil)), (toe + bot_wall, -(h_ftg + h_soil))]
+    else:
+        soil_dry_poly = []
+else:
+    # Heel-facing
+    x_wet_top = toe + bot_wall - taper * (h_wet_height / Hw) if Hw > 0 else toe + bot_wall
+    soil_wet_poly = [(toe + bot_wall, -h_ftg), (float(ftg), -h_ftg), (float(ftg), -(h_ftg + h_wet_height)), (x_wet_top, -(h_ftg + h_wet_height))] if h_wet_height > 0 else []
+    if h_soil > Hwtr:
+        if h_soil <= Hw:
+            x_soil_top = toe + bot_wall - taper * (h_soil / Hw) if Hw > 0 else toe + bot_wall
+            soil_dry_poly = [
+                (x_wet_top, -(h_ftg + h_wet_height)),
+                (float(ftg), -(h_ftg + h_wet_height)),
+                (float(ftg), -(h_ftg + h_soil)),
+                (x_soil_top, -(h_ftg + h_soil))
+            ]
+        else:
+            x_soil_top = toe + top_wall
+            soil_dry_poly = [
+                (x_wet_top, -(h_ftg + h_wet_height)),
+                (float(ftg), -(h_ftg + h_wet_height)),
+                (float(ftg), -(h_ftg + h_soil)),
+                (x_soil_top, -(h_ftg + h_soil)),
+                (x_soil_top, -(h_ftg + Hw))
+            ]
+    else:
+        soil_dry_poly = []
 
-soil_wet_poly = [(toe + bot_wall, -h_ftg), (float(ftg), -h_ftg), (float(ftg), -(h_ftg + h_wet_height)), (toe + bot_wall, -(h_ftg + h_wet_height))] if h_wet_height > 0 else []
+soil_dry_centroid = polygon_centroid(soil_dry_poly) if soil_dry_poly else (None, None)
 soil_wet_centroid = polygon_centroid(soil_wet_poly) if soil_wet_poly else (None, None)
 
 # Map each stem front node to stem centroid x for previous uses
@@ -2728,11 +2831,17 @@ cg_x_base = ftg / 2.0
 
 stem_rect_area = top_wall * Hw
 W_stem_rect = gamma_c * stem_rect_area * t
-cg_x_stem_rect = toe + bot_wall - top_wall / 2.0
+if taper_direction == 'Toe-facing':
+    cg_x_stem_rect = toe + bot_wall - top_wall / 2.0
+else:
+    cg_x_stem_rect = toe + top_wall / 2.0
 
 stem_tri_area = 0.5 * taper * Hw
 W_stem_tri = gamma_c * stem_tri_area * t
-cg_x_stem_tri = toe + (2.0 / 3.0) * taper if taper > 0 else float(toe)
+if taper_direction == 'Toe-facing':
+    cg_x_stem_tri = toe + (2.0 / 3.0) * taper if taper > 0 else float(toe)
+else:
+    cg_x_stem_tri = toe + top_wall + taper / 3.0 if taper > 0 else float(toe)
 
 W_conc = W_base + W_stem_rect + W_stem_tri
 # Add shear key weight if enabled
@@ -2745,9 +2854,17 @@ wall_area = stem_rect_area + stem_tri_area
 footing_area = base_area
 
 # 5. Soil weight on heel and lever arm
+A_wet, (cg_x_wet, cg_y_wet) = polygon_area_and_centroid(soil_wet_poly)
+A_dry, (cg_x_dry, cg_y_dry) = polygon_area_and_centroid(soil_dry_poly)
+
+W_soil_dry = gamma_soil_dry * A_dry * t
+W_soil_wet = gamma_soil_wet * A_wet * t
+W_soil = W_soil_dry + W_soil_wet
+if W_soil > 0:
+    cg_x_soil = (W_soil_dry * cg_x_dry + W_soil_wet * cg_x_wet) / (W_soil_dry + W_soil_wet)
+else:
+    cg_x_soil = toe + bot_wall + (ftg - (toe + bot_wall)) / 2.0
 soil_width = ftg - (toe + bot_wall)
-W_soil = (gamma_soil_dry * h_dry + gamma_soil_wet * h_wet) * soil_width * t
-cg_x_soil = toe + bot_wall + soil_width / 2.0
 
 # 5.5 Surcharge vertical weight and lever arm on heel footing
 if surcharge_type == 'Strip Load':
@@ -3749,7 +3866,7 @@ print("SUCCESS_DONE")
 def get_cached_ssrm_results(toe, heel, bot_wall, top_wall, h_ftg, Hw, h_soil, h_soil_toe,
                             gamma_soil_dry, gamma_soil_wet, phi, q, surcharge_type,
                             width_surcharge, offset_surcharge, Hwtr, Hwtr_front,
-                            gamma_w, kh, gamma_c, c_soil, Ec):
+                            gamma_w, kh, gamma_c, c_soil, Ec, taper_direction):
     return run_2d_ssrm_analysis(
         toe=toe, heel=heel, bot_wall=bot_wall, top_wall=top_wall, h_ftg=h_ftg, Hw=Hw,
         h_soil=h_soil, h_soil_toe=h_soil_toe,
@@ -4120,7 +4237,8 @@ try:
         kh=PGA * FPGA,
         gamma_c=gamma_c,
         c_soil=c_soil,
-        Ec=Ec * 1000.0  # MPa to kPa
+        Ec=Ec * 1000.0,  # MPa to kPa
+        taper_direction=taper_direction
     )
 
 except Exception as e:
@@ -4272,26 +4390,18 @@ with col_left:
                 d.view_box = (0, min_y, (ftg + 1.8)*mult, max_y - min_y)
             
             # Draw soil - Dry soil (above water table)
-            if h_soil > Hwtr:
-                d.append(draw.Lines((toe+bot_wall)*mult, -(h_wet_height+h_ftg)*mult,
-                                        ftg*mult, -(h_wet_height+h_ftg)*mult,
-                                        ftg*mult, -(h_soil+h_ftg)*mult,
-                                        (toe+bot_wall)*mult, -(h_soil+h_ftg)*mult,
-                                        close=True,
-                                fill='#5BC2A5',
-                                stroke='black',
-                                stroke_width=3))
+            if 'soil_dry_poly' in globals() and soil_dry_poly:
+                pts_dry = []
+                for px, py in soil_dry_poly:
+                    pts_dry.extend([px*mult, py*mult])
+                d.append(draw.Lines(*pts_dry, close=True, fill='#5BC2A5', stroke='black', stroke_width=3))
 
             # Saturated soil (below water table)
-            if h_wet_height > 0:
-                d.append(draw.Lines(ftg*mult, -h_ftg*mult,
-                                        ftg*mult, -(h_wet_height+h_ftg)*mult,
-                                        (toe+bot_wall)*mult, -(h_wet_height+h_ftg)*mult,
-                                        (toe+bot_wall)*mult, -h_ftg*mult,
-                                        close=True,
-                                fill='#A6F527',
-                                stroke='black',
-                                stroke_width=3))
+            if 'soil_wet_poly' in globals() and soil_wet_poly:
+                pts_wet = []
+                for px, py in soil_wet_poly:
+                    pts_wet.extend([px*mult, py*mult])
+                d.append(draw.Lines(*pts_wet, close=True, fill='#A6F527', stroke='black', stroke_width=3))
 
             # Soil in front of toe
             if h_soil_toe > 0:
@@ -4318,20 +4428,18 @@ with col_left:
                                         stroke='blue', stroke_width=15, stroke_dasharray='50,50'))
 
             # Draw Retaining wall
-            d.append(draw.Lines(0.0,  0.0,
-                                    0.0,  -h_ftg*mult,
-                                    toe*mult, -h_ftg*mult,
-                                    (toe+(taper/4))*mult, -(h_ftg+(Hw/4))*mult,
-                                    (toe+(taper/2))*mult, -(h_ftg+(Hw/2))*mult,
-                                    (toe+(taper*(3/4)))*mult, -(h_ftg+(Hw*(3/4)))*mult,
-                                    (toe+taper)*mult, -(h_ftg+Hw)*mult,
-                                    (toe+bot_wall)*mult, -(h_ftg+Hw)*mult,
-                                    (toe+bot_wall)*mult, -(h_ftg+(Hw*(3/4)))*mult,
-                                    (toe+bot_wall)*mult, -(h_ftg+(Hw/2))*mult,
-                                    (toe+bot_wall)*mult, -(h_ftg+(Hw/4))*mult,
-                                    (toe+bot_wall)*mult, -h_ftg*mult,
-                                    ftg*mult, -h_ftg*mult,
-                                    ftg*mult, 0.0,
+            wall_points_d = [
+                0.0, 0.0,
+                0.0, -h_ftg*mult,
+                toe*mult, -h_ftg*mult
+            ]
+            for px, py in stem_pts:
+                wall_points_d.extend([px*mult, py*mult])
+            wall_points_d.extend([
+                ftg*mult, -h_ftg*mult,
+                ftg*mult, 0.0
+            ])
+            d.append(draw.Lines(*wall_points_d,
                                     close=True,
                             fill='#eeee00',
                             stroke='black',
@@ -4389,13 +4497,13 @@ with col_left:
 
             d.append(draw.Lines(0, 0, 0, y_dim_h3, stroke='gray', stroke_width=10))
             d.append(draw.Lines(toe*mult, -h_ftg*mult, toe*mult, y_dim_h2, stroke='gray', stroke_width=10))
-            d.append(draw.Lines((toe+taper)*mult, -(h_ftg+Hw)*mult, (toe+taper)*mult, y_dim_h1, stroke='gray', stroke_width=10))
-            d.append(draw.Lines((toe+bot_wall)*mult, -(h_ftg+Hw)*mult, (toe+bot_wall)*mult, y_dim_h2, stroke='gray', stroke_width=10))
+            d.append(draw.Lines(top_left_stem_x*mult, -(h_ftg+Hw)*mult, top_left_stem_x*mult, y_dim_h1, stroke='gray', stroke_width=10))
+            d.append(draw.Lines(top_right_stem_x*mult, -(h_ftg+Hw)*mult, top_right_stem_x*mult, y_dim_h2, stroke='gray', stroke_width=10))
             d.append(draw.Lines(ftg*mult, 0, ftg*mult, y_dim_h3, stroke='gray', stroke_width=10))
 
             # 3. Top wall thickness
-            x_top_1 = (toe + taper) * mult
-            x_top_2 = (toe + bot_wall) * mult
+            x_top_1 = top_left_stem_x * mult
+            x_top_2 = top_right_stem_x * mult
             d.append(draw.Lines(x_top_1, y_dim_h1, x_top_2, y_dim_h1, stroke='black', stroke_width=20))
             d.append(draw.Circle(x_top_1, y_dim_h1, 0.06*mult))
             d.append(draw.Circle(x_top_2, y_dim_h1, 0.06*mult))
@@ -4552,20 +4660,18 @@ with col_left:
                             d.append(draw.Text(f"Req: {req_str} {status_str}", 0.14*mult, tx, ty - 0.15*mult, fill=color, text_anchor='middle'))
 
             # Draw retaining wall structure (yellow)
-            d_sni.append(draw.Lines(x_shift_sni,  -y_shift_sni,
-                                    x_shift_sni,  -h_ftg*mult - y_shift_sni,
-                                    toe*mult + x_shift_sni, -h_ftg*mult - y_shift_sni,
-                                    (toe+(taper/4))*mult + x_shift_sni, -(h_ftg+(Hw/4))*mult - y_shift_sni,
-                                    (toe+(taper/2))*mult + x_shift_sni, -(h_ftg+(Hw/2))*mult - y_shift_sni,
-                                    (toe+(taper*(3/4)))*mult + x_shift_sni, -(h_ftg+(Hw*(3/4)))*mult - y_shift_sni,
-                                    (toe+taper)*mult + x_shift_sni, -(h_ftg+Hw)*mult - y_shift_sni,
-                                    (toe+bot_wall)*mult + x_shift_sni, -(h_ftg+Hw)*mult - y_shift_sni,
-                                    (toe+bot_wall)*mult + x_shift_sni, -(h_ftg+(Hw*(3/4)))*mult - y_shift_sni,
-                                    (toe+bot_wall)*mult + x_shift_sni, -(h_ftg+(Hw/2))*mult - y_shift_sni,
-                                    (toe+bot_wall)*mult + x_shift_sni, -(h_ftg+(Hw/4))*mult - y_shift_sni,
-                                    (toe+bot_wall)*mult + x_shift_sni, -h_ftg*mult - y_shift_sni,
-                                    ftg*mult + x_shift_sni, -h_ftg*mult - y_shift_sni,
-                                    ftg*mult + x_shift_sni, -y_shift_sni,
+            wall_points_sni = [
+                x_shift_sni,  -y_shift_sni,
+                x_shift_sni,  -h_ftg*mult - y_shift_sni,
+                toe*mult + x_shift_sni, -h_ftg*mult - y_shift_sni
+            ]
+            for px, py in stem_pts:
+                wall_points_sni.extend([px*mult + x_shift_sni, py*mult - y_shift_sni])
+            wall_points_sni.extend([
+                ftg*mult + x_shift_sni, -h_ftg*mult - y_shift_sni,
+                ftg*mult + x_shift_sni, -y_shift_sni
+            ])
+            d_sni.append(draw.Lines(*wall_points_sni,
                                     close=True,
                                     fill='#eeee00',
                                     stroke='black',
@@ -4590,8 +4696,8 @@ with col_left:
                                      "Width B", f"{ftg:.2f} m", f"{0.4*H_tot:.2f}~{0.7*H_tot:.2f} m", ftg_ok, is_vertical=False, text_y_override=y_dim_bottom + 1.0*mult)
 
             # 4. Top Wall thickness (above stem top)
-            draw_dim_cad_sni(d_sni, (toe + taper)*mult + x_shift_sni, -(h_ftg + Hw + 0.15)*mult - y_shift_sni,
-                                     (toe + bot_wall)*mult + x_shift_sni, -(h_ftg + Hw + 0.15)*mult - y_shift_sni,
+            draw_dim_cad_sni(d_sni, top_left_stem_x*mult + x_shift_sni, -(h_ftg + Hw + 0.15)*mult - y_shift_sni,
+                                     top_right_stem_x*mult + x_shift_sni, -(h_ftg + Hw + 0.15)*mult - y_shift_sni,
                                      "Top Wall", f"{top_wall:.2f} m", ">= 0.30 m", top_wall_ok, is_vertical=False, text_pos='top')
 
             # 5. Bottom Wall thickness (Base Wall) - Text level 2 (base wall text below toe length text)
@@ -4605,11 +4711,17 @@ with col_left:
                                      "Toe Length", f"{toe:.2f} m", f">={ftg/3:.2f} m", toe_ok, is_vertical=False, text_y_override=y_dim_bottom + 0.0*mult)
 
             # 7. Front Slope Batter
-            slope_val = taper / Hw if Hw > 0 else 0
-            slope_str = f"1 : {1.0/slope_val:.1f}" if slope_val > 0 else "Vertical"
-            draw_dim_cad_sni(d_sni, (toe + taper/2)*mult + x_shift_sni - 0.15*mult, -(h_ftg + Hw/2)*mult - y_shift_sni,
-                                     (toe + taper/2)*mult + x_shift_sni + 0.15*mult, -(h_ftg + Hw/2)*mult - y_shift_sni,
-                                     "Batter", slope_str, ">= 1:48", slope_ok, is_vertical=False, text_pos='top')
+            if taper_direction == 'Toe-facing':
+                slope_val = taper / Hw if Hw > 0 else 0
+                slope_str = f"1 : {1.0/slope_val:.1f}" if slope_val > 0 else "Vertical"
+                slope_req = ">= 1:48"
+            else:
+                slope_val = 0.0
+                slope_str = "Vertical"
+                slope_req = "N/A"
+            draw_dim_cad_sni(d_sni, batter_mid_x*mult + x_shift_sni - 0.15*mult, -(h_ftg + Hw/2)*mult - y_shift_sni,
+                                     batter_mid_x*mult + x_shift_sni + 0.15*mult, -(h_ftg + Hw/2)*mult - y_shift_sni,
+                                     "Batter", slope_str, slope_req, slope_ok, is_vertical=False, text_pos='top')
 
             d_sni.set_render_size(800, 550)
             st.image(d_sni.as_svg(), use_container_width=True)
@@ -5299,19 +5411,17 @@ if enable_pile:
                 yshift_pile = (margin_bottom + L_draw) * mult
                 
                 # Draw soil - Dry soil (above water table)
-                if h_soil > Hwtr:
-                    d_pile_svg.append(draw.Lines(x_shift + (toe+bot_wall)*mult, -(h_wet_height+h_ftg)*mult - yshift_pile,
-                                            x_shift + ftg*mult, -(h_wet_height+h_ftg)*mult - yshift_pile,
-                                            x_shift + ftg*mult, -(h_soil+h_ftg)*mult - yshift_pile,
-                                            x_shift + (toe+bot_wall)*mult, -(h_soil+h_ftg)*mult - yshift_pile,
-                                            close=True, fill='#5BC2A5', stroke='black', stroke_width=3))
+                if 'soil_dry_poly' in globals() and soil_dry_poly:
+                    pts_dry = []
+                    for px, py in soil_dry_poly:
+                        pts_dry.extend([px*mult + x_shift, py*mult - yshift_pile])
+                    d_pile_svg.append(draw.Lines(*pts_dry, close=True, fill='#5BC2A5', stroke='black', stroke_width=3))
 
-                if h_wet_height > 0:
-                    d_pile_svg.append(draw.Lines(x_shift + ftg*mult, -h_ftg*mult - yshift_pile,
-                                            x_shift + ftg*mult, -(h_wet_height+h_ftg)*mult - yshift_pile,
-                                            x_shift + (toe+bot_wall)*mult, -(h_wet_height+h_ftg)*mult - yshift_pile,
-                                            x_shift + (toe+bot_wall)*mult, -h_ftg*mult - yshift_pile,
-                                            close=True, fill='#A6F527', stroke='black', stroke_width=3))
+                if 'soil_wet_poly' in globals() and soil_wet_poly:
+                    pts_wet = []
+                    for px, py in soil_wet_poly:
+                        pts_wet.extend([px*mult + x_shift, py*mult - yshift_pile])
+                    d_pile_svg.append(draw.Lines(*pts_wet, close=True, fill='#A6F527', stroke='black', stroke_width=3))
 
                 if h_soil_toe > 0:
                     d_pile_svg.append(draw.Lines(x_shift + 0, -h_ftg*mult - yshift_pile,
@@ -5321,21 +5431,18 @@ if enable_pile:
                                             close=True, fill='#5BC2A5', stroke='black', stroke_width=3))
 
                 # Draw Retaining wall (shifted up by L_draw + margin_bottom)
-                d_pile_svg.append(draw.Lines(x_shift + 0.0,  -yshift_pile,
-                                        x_shift + 0.0,  -h_ftg*mult - yshift_pile,
-                                        x_shift + toe*mult, -h_ftg*mult - yshift_pile,
-                                        x_shift + (toe+(taper/4))*mult, -(h_ftg+(Hw/4))*mult - yshift_pile,
-                                        x_shift + (toe+(taper/2))*mult, -(h_ftg+(Hw/2))*mult - yshift_pile,
-                                        x_shift + (toe+(taper*(3/4)))*mult, -(h_ftg+(Hw*(3/4)))*mult - yshift_pile,
-                                        x_shift + (toe+taper)*mult, -(h_ftg+Hw)*mult - yshift_pile,
-                                        x_shift + (toe+bot_wall)*mult, -(h_ftg+Hw)*mult - yshift_pile,
-                                        x_shift + (toe+bot_wall)*mult, -(h_ftg+(Hw*(3/4)))*mult - yshift_pile,
-                                        x_shift + (toe+bot_wall)*mult, -(h_ftg+(Hw/2))*mult - yshift_pile,
-                                        x_shift + (toe+bot_wall)*mult, -(h_ftg+(Hw/4))*mult - yshift_pile,
-                                        x_shift + (toe+bot_wall)*mult, -h_ftg*mult - yshift_pile,
-                                        x_shift + ftg*mult, -h_ftg*mult - yshift_pile,
-                                        x_shift + ftg*mult, -yshift_pile,
-                                        close=True, fill='#eeee00', stroke='black', stroke_width=50))
+                wall_points_pile = [
+                    x_shift + 0.0,  -yshift_pile,
+                    x_shift + 0.0,  -h_ftg*mult - yshift_pile,
+                    x_shift + toe*mult, -h_ftg*mult - yshift_pile
+                ]
+                for px, py in stem_pts:
+                    wall_points_pile.extend([x_shift + px*mult, py*mult - yshift_pile])
+                wall_points_pile.extend([
+                    x_shift + ftg*mult, -h_ftg*mult - yshift_pile,
+                    x_shift + ftg*mult, -yshift_pile
+                ])
+                d_pile_svg.append(draw.Lines(*wall_points_pile, close=True, fill='#eeee00', stroke='black', stroke_width=50))
                 
                 # Draw Piles with zig-zag break lines
                 w_draw = (diameter_pile if pile_shape == 'Circle' else width_x_pile)
