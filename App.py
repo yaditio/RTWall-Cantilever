@@ -517,6 +517,16 @@ def export_report_assets():
             pass
             
     # Save matplotlib figures (make sure they are updated)
+    if 'fig_inputs' in globals() and fig_inputs is not None:
+        try:
+            fig_inputs.savefig("report_temp/xslope_inputs.png", dpi=150, bbox_inches='tight')
+        except Exception:
+            pass
+    if 'fig_mesh' in globals() and fig_mesh is not None:
+        try:
+            fig_mesh.savefig("report_temp/xslope_mesh.png", dpi=150, bbox_inches='tight')
+        except Exception:
+            pass
     if 'fig_winkler' in globals() and fig_winkler is not None:
         try:
             fig_winkler.savefig("report_temp/pile_winkler.png", dpi=150, bbox_inches='tight')
@@ -1222,9 +1232,18 @@ def generate_pdf_reportlab(output_path):
     story.append(t_stab)
     story.append(Spacer(1, 15))
     
+    if os.path.exists("report_temp/xslope_inputs.png"):
+        story.append(Paragraph("<b>XSLOPE Slope Geometry & Inputs Diagram:</b>", h2_style))
+        story.append(Image("report_temp/xslope_inputs.png", width=450, height=200))
+        story.append(Spacer(1, 10))
+    if os.path.exists("report_temp/xslope_mesh.png"):
+        story.append(Paragraph("<b>XSLOPE FEM Mesh with Material Zones (tri6):</b>", h2_style))
+        story.append(Image("report_temp/xslope_mesh.png", width=450, height=200))
+        story.append(Spacer(1, 10))
     if os.path.exists("report_temp/stability_ssrm.png"):
-        story.append(Paragraph("<b>2D SSRM Slip Surface Contour:</b>", h2_style))
-        story.append(Image("report_temp/stability_ssrm.png", width=450, height=180))
+        story.append(Paragraph("<b>2D SSRM Viscoplastic Shear Strain Failure Surface:</b>", h2_style))
+        story.append(Image("report_temp/stability_ssrm.png", width=450, height=200))
+        story.append(Spacer(1, 10))
         
     story.append(PageBreak())
     
@@ -1633,7 +1652,14 @@ def generate_docx_report(output_path):
     if 'fs_ssrm' in globals() and fs_ssrm is not None:
         doc.add_paragraph(f"Global Slope Stability SSRM FS = {fs_ssrm:.3f}")
         
+    if os.path.exists("report_temp/xslope_inputs.png"):
+        doc.add_heading("XSLOPE Slope Geometry & Inputs Diagram", level=2)
+        doc.add_picture("report_temp/xslope_inputs.png", width=Inches(4.5))
+    if os.path.exists("report_temp/xslope_mesh.png"):
+        doc.add_heading("XSLOPE FEM Mesh with Material Zones (tri6)", level=2)
+        doc.add_picture("report_temp/xslope_mesh.png", width=Inches(4.5))
     if os.path.exists("report_temp/stability_ssrm.png"):
+        doc.add_heading("2D SSRM Viscoplastic Shear Strain Failure Surface", level=2)
         doc.add_picture("report_temp/stability_ssrm.png", width=Inches(4.5))
         
     # 5. Bearing Capacity
@@ -1816,6 +1842,21 @@ st.set_page_config(layout="wide", page_title="RT Wall Cantilever", page_icon="�
 # CSS Injection for Premium Styling
 st.markdown("""
 <style>
+    /* Hide Streamlit default status widget / top running banner */
+    [data-testid="stStatusWidget"],
+    div[data-testid="stStatusWidget"],
+    .stStatusWidget,
+    div[class*="stStatusWidget"],
+    header [data-testid="stStatusWidget"] {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        pointer-events: none !important;
+    }
     /* Gradient Dashboard Header Banner */
     .dashboard-header {
         background: linear-gradient(135deg, #1f4068 0%, #162447 100%);
@@ -1848,6 +1889,112 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def update_splash(placeholder, pct, title_text, desc_text):
+    if placeholder is None:
+        return
+    circ = 276.46
+    offset = circ * (1.0 - float(pct) / 100.0)
+    splash_html = f"""
+    <style>
+    [data-testid="stStatusWidget"],
+    div[data-testid="stStatusWidget"],
+    .stStatusWidget,
+    div[class*="stStatusWidget"],
+    header [data-testid="stStatusWidget"] {{
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+    }}
+    .splash-overlay {{
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(15, 23, 42, 0.75);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        z-index: 999999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }}
+    .splash-card {{
+        background: #ffffff;
+        border-radius: 20px;
+        padding: 40px 48px;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        text-align: center;
+        max-width: 480px;
+        width: 90%;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+    }}
+    .circular-progress {{
+        width: 110px;
+        height: 110px;
+        margin: 0 auto 24px auto;
+        position: relative;
+    }}
+    .circular-progress svg {{
+        width: 100%;
+        height: 100%;
+        transform: rotate(-90deg);
+    }}
+    .circular-progress circle {{
+        fill: none;
+        stroke-width: 8;
+        stroke-linecap: round;
+    }}
+    .circle-bg {{
+        stroke: #e2e8f0;
+    }}
+    .circle-fill {{
+        stroke: #1f4068;
+        transition: stroke-dashoffset 0.3s ease-in-out;
+    }}
+    .progress-text {{
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 1.45rem;
+        font-weight: 700;
+        color: #162447;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }}
+    .splash-title {{
+        margin: 0 0 8px 0;
+        color: #162447;
+        font-size: 1.25rem;
+        font-weight: 700;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }}
+    .splash-desc {{
+        margin: 0;
+        color: #64748b;
+        font-size: 0.92rem;
+        line-height: 1.45;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }}
+    </style>
+    <div class="splash-overlay">
+        <div class="splash-card">
+            <div class="circular-progress">
+                <svg viewBox="0 0 100 100">
+                    <circle class="circle-bg" cx="50" cy="50" r="44"></circle>
+                    <circle class="circle-fill" cx="50" cy="50" r="44" stroke-dasharray="276.46" stroke-dashoffset="{offset:.2f}"></circle>
+                </svg>
+                <div class="progress-text">{pct}%</div>
+            </div>
+            <div class="splash-title">{title_text}</div>
+            <div class="splash-desc">{desc_text}</div>
+        </div>
+    </div>
+    """
+    placeholder.markdown(splash_html, unsafe_allow_html=True)
+
 # ----------------------------------------
 
 # Clean up anything created by invoked opensees commands
@@ -1856,11 +2003,8 @@ ops.wipe()
 # We define the space in which we will create the model
 ops.model('basic','-ndm',2,'-ndf',2) # Displacements in 2 directions, out-of-plane displacements and rotations are restricted.
 
-# Sidebar header and Report button at the top
-st.sidebar.markdown("### 📋 Retaining Wall Report")
-if st.sidebar.button("📄 Generate Report", key="btn_report_sidebar", use_container_width=True):
-    st.session_state["trigger_report_dialog"] = True
-st.sidebar.markdown("---")
+# Sidebar header
+st.sidebar.markdown("### ⚙️ Input Configuration")
 
 # Streamlit sidebar inputs (re-runs app on change)
 tab_geom, tab_soil, tab_struct, tab_seismic, tab_reinf, tab_bearing, tab_pile = st.sidebar.tabs(['Geometry', 'Soil', 'Structure', 'Seismic', 'Concrete & Reinf', 'Bearing Capacity', 'Pile'])
@@ -1917,6 +2061,8 @@ with tab_seismic:
 with tab_struct:
     # Concrete self-weight
     gamma_c = st.number_input('Unit weight of concrete (kN/m3)', value=24.0, step=0.1, format="%.2f")
+    c_concrete = st.number_input('Concrete cohesion (kPa)', value=180.0, step=10.0, format="%.1f")
+
 
 with tab_reinf:
     st.subheader("Concrete Properties")
@@ -2063,8 +2209,33 @@ with tab_pile:
         FS_pile_axial = 2.5
         FS_pile_lateral = 2.5
         pile_loading_type = 'static'
-        delta_pile_axial = 20.0
-        alpha_pile_axial = 0.5
+# Sidebar Controls: Run Analysis & Generate Report
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🚀 Analysis & Report Controls")
+
+run_analysis_clicked = st.sidebar.button("🚀 Run Analysis", key="btn_run_analysis", type="primary", use_container_width=True)
+
+if run_analysis_clicked:
+    st.session_state["analysis_run"] = True
+    st.session_state["trigger_splash"] = True
+
+has_analysis_run = st.session_state.get("analysis_run", False)
+
+if has_analysis_run:
+    if st.sidebar.button("📄 Generate Report", key="btn_report_sidebar", use_container_width=True):
+        st.session_state["trigger_report_splash"] = True
+else:
+    st.sidebar.info("💡 Click **'🚀 Run Analysis'** above to run stability analysis & enable report export.")
+
+splash_placeholder = None
+if st.session_state.get("trigger_splash", False):
+    splash_placeholder = st.empty()
+    update_splash(
+        splash_placeholder,
+        15,
+        "Validating Geometry & Soil Profile",
+        "Checking stem wall dimensions, soil parameters, and surcharge loadings..."
+    )
 
 # Derived geometry
 ftg = toe + heel + bot_wall  # total footing length
@@ -2098,9 +2269,25 @@ else:
         ((toe + top_wall), -(h_ftg + Hw)),
         ((toe + bot_wall - taper*3.0/4.0), -(h_ftg + Hw*3.0/4.0)),
         ((toe + bot_wall - taper/2.0), -(h_ftg + Hw/2.0)),
-        ((toe + bot_wall - taper/4.0), -(h_ftg + Hw/4.0)),
         ((toe + bot_wall), -h_ftg)
     ]
+
+if not has_analysis_run:
+    st.markdown("""
+    <div class="dashboard-header">
+        <h1>🧱 RT Wall Cantilever</h1>
+        <p>Cantilever Retaining Wall Design & Verification Tool</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    with st.container(border=True):
+        st.markdown("### 👈 Ready to Analyze")
+        st.markdown("""
+        Configure your retaining wall dimensions, soil parameters, structural reinforcement, and pile foundation options in the sidebar tabs.
+        
+        Once ready, click **'🚀 Run Analysis'** in the sidebar to execute stability analysis, render the design dashboard, and enable report export.
+        """)
+    st.stop()
 
 # Build a refined mesh by splitting the original triangles while keeping
 # the overall outer geometry unchanged. We create 8 nodes along the
@@ -2294,8 +2481,6 @@ total_elements = elem_id - 1
 
 # heel_nodes kept for reference (top-of-footing sampling points)
 heel_nodes = top_node_ids
-
-st.success('Parameters updated — Streamlit will re-run automatically when inputs change.')
 
 # Defining time series
 ops.timeSeries("Linear", 1)
@@ -2722,7 +2907,6 @@ ops.analyze(1) # Specifies how many times the analysis will be performed.
 lateral_per_node = 0.0
 kh = PGA * FPGA
 if kh > 0.0:
-    st.info('Applying pseudo-static seismic loads...')
     # approximate weights (kN) per unit thickness * thickness `t`
     wall_area = (top_wall + bot_wall) / 2.0 * Hw
     footing_area = ftg * h_ftg
@@ -2764,7 +2948,6 @@ if kh > 0.0:
                     max_y = dy
             except Exception:
                 pass
-        st.success(f'Pseudo-static applied (kh={kh:.4f}). Total lateral = {total_lateral:.3f} kN. Max x disp = {max_x:.6f} m')
     else:
         st.error('Pseudo-static analysis failed (ops.analyze returned non-zero).')
 
@@ -3511,6 +3694,8 @@ settlement_heel_pile = 0.0
 allowable_pile_settlement_mm = 0.0
 fig_pile_sec = None
 
+update_splash(splash_placeholder, 35, "Running 1D OpenSees Stem Beam Analysis", "Solving stem node displacements, bending moments, & shear forces...")
+
 def run_1d_stem_beam_analysis(Hw, top_wall, bot_wall, h_ftg, Ec, h_soil, h_soil_toe,
                                gamma_soil_dry, gamma_soil_wet, phi, q, surcharge_type,
                                width_surcharge, offset_surcharge, Hwtr, Hwtr_front,
@@ -3700,7 +3885,11 @@ print(json.dumps(results))
 def run_2d_ssrm_analysis(toe, heel, bot_wall, top_wall, h_ftg, Hw, h_soil, h_soil_toe,
                          gamma_soil_dry, gamma_soil_wet, phi, q, surcharge_type,
                          width_surcharge, offset_surcharge, Hwtr, Hwtr_front,
-                         gamma_w, kh, gamma_c, c_soil, Ec):
+                         gamma_w, kh, gamma_c, c_soil, c_concrete, Es_soil, nu_soil,
+                         taper_direction, include_shear_key, shear_key_distance,
+                         shear_key_width, shear_key_thickness,
+                         enable_pile=False, pile_offset=0.5, L_pile=10.0,
+                         diameter_pile=0.4, pile_material='Concrete', Ec=34.8e3, Es=200e3):
     import subprocess
     import sys
     import pickle
@@ -3713,8 +3902,9 @@ def run_2d_ssrm_analysis(toe, heel, bot_wall, top_wall, h_ftg, Hw, h_soil, h_soi
     pickle_path = os.path.join(scratch_dir, "ssrm_results.pkl")
     pickle_path_escaped = pickle_path.replace("\\", "\\\\")
 
+    E_pile_val = (Es if pile_material == 'Steel' else Ec) * 1000.0
+
     subprocess_code = f"""
-import openseespy.opensees as ops
 import numpy as np
 import pickle
 import xslope
@@ -3730,116 +3920,277 @@ h_ftg = {h_ftg}
 Hw = {Hw}
 h_soil = {h_soil}
 h_soil_toe = {h_soil_toe}
+taper_direction = '{taper_direction}'
+include_shear_key = {include_shear_key}
+shear_key_distance = {shear_key_distance}
+shear_key_width = {shear_key_width}
+shear_key_thickness = {shear_key_thickness}
+Hwtr = {Hwtr}
+Hwtr_front = {Hwtr_front}
+gamma_w = {gamma_w}
+c_soil = {c_soil}
+c_concrete = {c_concrete}
+phi = {phi}
+gamma_soil_dry = {gamma_soil_dry}
+gamma_soil_wet = {gamma_soil_wet}
+gamma_c = {gamma_c}
+Es_soil = {Es_soil}
+nu_soil = {nu_soil}
+kh = {kh}
 
-ftg_w = toe + heel + bot_wall
-y_lower = h_soil_toe
-y_upper = h_ftg + h_soil
-y_bottom = -5.0
+enable_pile = {enable_pile}
+pile_offset = {pile_offset}
+L_pile = {L_pile}
+diameter_pile = {diameter_pile}
+E_pile = {E_pile_val}
 
-# Vertical cut at x_cut (front face of stem)
-x_cut = toe
+def _clean_poly(pts):
+    clean = []
+    for p in pts:
+        if not clean or (abs(clean[-1][0] - p[0]) > 1e-6 or abs(clean[-1][1] - p[1]) > 1e-6):
+            clean.append(p)
+    if len(clean) > 1 and abs(clean[0][0] - clean[-1][0]) < 1e-6 and abs(clean[0][1] - clean[-1][1]) < 1e-6:
+        clean.pop()
+    return clean
 
-# Beam slightly inside the retained soil so it couples to the mesh
-pile_x = x_cut + 0.05
+# Geometry coordinates
+x0 = 10.0
+ftg_len = toe + bot_wall + heel
+taper = bot_wall - top_wall
 
-# Soil polygon: vertical cut at x_cut
-soil_poly = [
-    (-10.0, y_bottom),
-    (ftg_w + 15.0, y_bottom),
-    (ftg_w + 15.0, y_upper),
-    (x_cut, y_upper),
-    (x_cut, y_lower),
-    (-10.0, y_lower),
-    (-10.0, y_bottom)
+stem_front_ftg_x = x0 + toe + (taper if taper_direction == 'Toe-facing' else 0.0)
+stem_back_ftg_x = x0 + toe + bot_wall
+stem_front_top_x = x0 + toe + (taper if taper_direction == 'Toe-facing' else 0.0)
+stem_back_top_x = x0 + toe + (bot_wall if taper_direction == 'Toe-facing' else top_wall)
+
+wall_coords = [
+    (x0, h_ftg),
+    (stem_front_ftg_x, h_ftg),
+    (stem_front_top_x, h_ftg + Hw),
+    (stem_back_top_x, h_ftg + Hw),
+    (stem_back_ftg_x, h_ftg),
+    (x0 + ftg_len, h_ftg),
+    (x0 + ftg_len, 0.0),
 ]
-polygons = [{{"coords": soil_poly, "mat_id": 0}}]
 
-# Stem wall beam: from footing top to soil top
-stem_base_y = h_ftg
-stem_top_y = y_upper
-pile_lines = [[(pile_x, stem_base_y), (pile_x, stem_top_y)]]
+sk_x1 = x0 + shear_key_distance
+sk_x2 = x0 + shear_key_distance + shear_key_width
 
-# Mesh
-mesh = build_mesh_from_polygons(
-    polygons=polygons,
-    target_size=1.2,
-    element_type='quad8',
-    lines=pile_lines
-)
+pile_pts = []
+if enable_pile:
+    x_pile_toe = x0 + pile_offset
+    x_pile_heel = x0 + ftg_len - pile_offset
+    pile_pts = [x_pile_heel, x_pile_toe]
 
-# Surcharge behind the wall
+if include_shear_key:
+    for xp in pile_pts:
+        if xp > sk_x2:
+            wall_coords.append((xp, 0.0))
+    wall_coords.append((sk_x2, 0.0))
+    wall_coords.append((sk_x2, -shear_key_thickness))
+    for xp in pile_pts:
+        if sk_x1 <= xp <= sk_x2:
+            wall_coords.append((xp, -shear_key_thickness))
+    wall_coords.append((sk_x1, -shear_key_thickness))
+    wall_coords.append((sk_x1, 0.0))
+    for xp in pile_pts:
+        if xp < sk_x1:
+            wall_coords.append((xp, 0.0))
+else:
+    for xp in pile_pts:
+        wall_coords.append((xp, 0.0))
+
+wall_coords.append((x0, 0.0))
+
+y_bottom = -max(5.0, h_ftg * 2.0, (L_pile + 5.0) if enable_pile else 0.0)
+x_min = 0.0
+x_max = x0 + ftg_len + 15.0
+
+soil_coords = [
+    (x_min, y_bottom),
+    (x_max, y_bottom),
+    (x_max, h_ftg + h_soil),
+    (stem_back_top_x, h_ftg + h_soil),
+    (stem_back_top_x, h_ftg + Hw),
+    (stem_back_ftg_x, h_ftg),
+    (x0 + ftg_len, h_ftg),
+    (x0 + ftg_len, 0.0),
+]
+
+if include_shear_key:
+    for xp in pile_pts:
+        if xp > sk_x2:
+            soil_coords.append((xp, 0.0))
+    soil_coords.append((sk_x2, 0.0))
+    soil_coords.append((sk_x2, -shear_key_thickness))
+    for xp in pile_pts:
+        if sk_x1 <= xp <= sk_x2:
+            soil_coords.append((xp, -shear_key_thickness))
+    soil_coords.append((sk_x1, -shear_key_thickness))
+    soil_coords.append((sk_x1, 0.0))
+    for xp in pile_pts:
+        if xp < sk_x1:
+            soil_coords.append((xp, 0.0))
+else:
+    for xp in pile_pts:
+        soil_coords.append((xp, 0.0))
+
+soil_coords.extend([
+    (x0, 0.0),
+    (x0, h_ftg),
+    (stem_front_ftg_x, h_ftg),
+    (stem_front_ftg_x, h_ftg + min(h_soil_toe, Hw)),
+    (x0, h_ftg + h_soil_toe),
+    (x_min, h_ftg + h_soil_toe)
+])
+
+polygons = [
+    {{'coords': _clean_poly(soil_coords), 'mat_id': 0}},
+    {{'coords': _clean_poly(wall_coords), 'mat_id': 1}}
+]
+
+lines_coords = None
+if enable_pile:
+    y_pile_toe_top = -shear_key_thickness if (include_shear_key and sk_x1 <= x_pile_toe <= sk_x2) else 0.0
+    y_pile_heel_top = -shear_key_thickness if (include_shear_key and sk_x1 <= x_pile_heel <= sk_x2) else 0.0
+    pile_line_toe = [(x_pile_toe, y_pile_toe_top), (x_pile_toe, y_pile_toe_top - L_pile)]
+    pile_line_heel = [(x_pile_heel, y_pile_heel_top), (x_pile_heel, y_pile_heel_top - L_pile)]
+    lines_coords = [pile_line_toe, pile_line_heel]
+
+mesh = build_mesh_from_polygons(polygons=polygons, target_size=1.2, element_type='tri6', lines=lines_coords)
+
+# Piezometric line for groundwater
+has_water = (Hwtr > 0 or Hwtr_front > 0)
+piezo_line = [(x_min, h_ftg + Hwtr_front), (x0, h_ftg + Hwtr_front), (stem_back_ftg_x, h_ftg + Hwtr), (x_max, h_ftg + Hwtr)]
+
+from shapely.geometry import Polygon
+from xslope.fileio import build_ground_surface_from_polygons
+
+soil_poly_clean = _clean_poly(soil_coords)
+wall_poly_clean = _clean_poly(wall_coords)
+poly_objs = [
+    {{'polygon': Polygon(soil_poly_clean), 'mat_id': 0}},
+    {{'polygon': Polygon(wall_poly_clean), 'mat_id': 1}}
+]
+ground_surface, domain_polygon = build_ground_surface_from_polygons(poly_objs)
+
+# Surcharge behind wall
 q_val = {q}
-dloads = [
+dloads = []
+if q_val > 0:
+    dloads = [
+        [
+            {{'X': stem_back_top_x, 'Y': h_ftg + h_soil, 'Normal': q_val}},
+            {{'X': x_max, 'Y': h_ftg + h_soil, 'Normal': q_val}}
+        ]
+    ]
+
+slope_data = {{
+    'ground_surface': ground_surface,
+    'domain_polygon': domain_polygon,
+    'polygons': poly_objs,
+    'circular': False,
+    'materials': [
+        {{
+            'name': 'Soil',
+            'c': c_soil,
+            'phi': phi,
+            'gamma': gamma_soil_dry,
+            'gamma_sat': gamma_soil_wet,
+            'E': Es_soil,
+            'nu': nu_soil,
+            't_cut': 0.0,
+            'option': 'mc',
+            'd': 0.0,
+            'psi': 0.0,
+            'u': 'piezo' if has_water else 'none'
+        }},
+        {{
+            'name': 'Concrete Wall',
+            'c': c_concrete,
+            'phi': 40.0,
+            'gamma': gamma_c,
+            'E': 40000.0,
+            'nu': 0.15,
+            't_cut': 0.0,
+            'option': 'mc',
+            'd': 0.0,
+            'psi': 0.0,
+            'u': 'none'
+        }}
+    ],
+    'piezo_line': piezo_line if has_water else None,
+    'dloads': dloads,
+    'gamma_water': gamma_w,
+    'k_seismic': kh,
+    'tcrack_depth': 0.0,
+    'tcrack_water': False,
+    'max_depth': y_bottom
+}}
+
+# Generate starting circles (matching XSLOPE Studio algorithm)
+H_slope = max(1.0, (h_ftg + Hw + h_soil) - (h_ftg + h_soil_toe))
+x_toe_surf = x0
+y_toe_surf = h_ftg + h_soil_toe
+x_crest_surf = stem_back_top_x
+y_crest_surf = h_ftg + h_soil
+
+xo1 = x_toe_surf + 0.25 * (stem_back_top_x - x_toe_surf)
+yo1 = y_crest_surf + 1.2 * H_slope
+depth1 = y_toe_surf - 0.2 * H_slope
+
+xo2 = x_toe_surf + 0.5 * (stem_back_top_x - x_toe_surf)
+yo2 = y_crest_surf + 1.5 * H_slope
+depth2 = y_toe_surf - 0.5 * H_slope
+
+slope_data['circles'] = [
     {{
-        "coords": [(x_cut + 0.3, y_upper), (ftg_w + 15.0, y_upper)],
-        "loads": [q_val, q_val]
+        'Xo': xo1,
+        'Yo': yo1,
+        'Option': 'Depth',
+        'Depth': depth1,
+        'Xi': 2.0,
+        'Yi': 2.0,
+        'R': yo1 - depth1
+    }},
+    {{
+        'Xo': xo2,
+        'Yo': yo2,
+        'Option': 'Depth',
+        'Depth': depth2,
+        'Xi': 2.0,
+        'Yi': 2.0,
+        'R': yo2 - depth2
     }}
 ]
 
-# Average stem thickness for the beam section
-t_beam = (top_wall + bot_wall) / 2.0
-E_conc = {Ec}
-
-slope_data = {{
-    "materials": [
+if enable_pile:
+    slope_data['pile_lines'] = [
         {{
-            "c": {c_soil},
-            "phi": {phi},
-            "gamma": {gamma_soil_dry},
-            "E": 20000.0,
-            "nu": 0.3,
-            "pp_option": "none"
-        }}
-    ],
-    "pile_lines": [
+            'x1': x_pile_toe, 'y1': y_pile_toe_top, 'x2': x_pile_toe, 'y2': y_pile_toe_top - L_pile,
+            'E': E_pile,
+            'D_pile': diameter_pile,
+            'S': 1.5,
+            'fixity': 'fixed'
+        }},
         {{
-            "x1": pile_x, "y1": stem_base_y, "x2": pile_x, "y2": stem_top_y,
-            "E": E_conc,
-            "D_pile": t_beam,
-            "S": 1.0,
-            "fixity": "fixed",
-            "V_cap": 1000.0,
-            "M_cap": 1000.0
+            'x1': x_pile_heel, 'y1': y_pile_heel_top, 'x2': x_pile_heel, 'y2': y_pile_heel_top - L_pile,
+            'E': E_pile,
+            'D_pile': diameter_pile,
+            'S': 1.5,
+            'fixity': 'fixed'
         }}
-    ],
-    "dloads": dloads,
-    "gamma_water": {gamma_w},
-    "k_seismic": {kh},
-    "max_depth": y_bottom
-}}
+    ]
 
 fem_data = build_fem_data(slope_data, mesh=mesh)
 
-# Fix bottom tip node of the stem beam
-nodes = fem_data['nodes']
-pile_node_pairs = fem_data['pile_node_pairs']
-pile_line_idx_by_pile_elem = fem_data['pile_line_idx_by_pile_elem']
-
-pile_tip_nodes = []
-for pl_idx in range(len(slope_data['pile_lines'])):
-    pile_nodes_for_line = set()
-    for p_idx in range(len(pile_node_pairs)):
-        if pile_line_idx_by_pile_elem[p_idx] == pl_idx:
-            n0, n1 = pile_node_pairs[p_idx]
-            pile_nodes_for_line.add(n0)
-            pile_nodes_for_line.add(n1)
-    if pile_nodes_for_line:
-        bottom_node = min(pile_nodes_for_line, key=lambda nd: nodes[nd, 1])
-        pile_tip_nodes.append(bottom_node)
-
-fem_data['pile_head_nodes'] = np.append(fem_data['pile_head_nodes'], pile_tip_nodes)
-fem_data['pile_head_fixed'] = np.append(fem_data['pile_head_fixed'], [True] * len(pile_tip_nodes))
-
-for tip_node in pile_tip_nodes:
-    fem_data['bc_type'][tip_node] = 1
-
 # Solve SSRM
-res = solve_ssrm(fem_data, F_min=0.3, F_max=3.0, tolerance=0.05, debug_level=0, dt_scale=5.0, failure_criterion="displacement_increase")
+res = solve_ssrm(fem_data, F_min=0.3, F_max=3.0, tolerance=0.05, debug_level=0)
 
-# Save result dict to pickle file
 result_dict = {{
     "FS": res['FS'],
     "fem_data": fem_data,
+    "slope_data": slope_data,
     "last_solution": res.get('last_solution', None)
 }}
 
@@ -3866,18 +4217,28 @@ print("SUCCESS_DONE")
 def get_cached_ssrm_results(toe, heel, bot_wall, top_wall, h_ftg, Hw, h_soil, h_soil_toe,
                             gamma_soil_dry, gamma_soil_wet, phi, q, surcharge_type,
                             width_surcharge, offset_surcharge, Hwtr, Hwtr_front,
-                            gamma_w, kh, gamma_c, c_soil, Ec, taper_direction):
+                            gamma_w, kh, gamma_c, c_soil, c_concrete, Es_soil, nu_soil,
+                            taper_direction, include_shear_key, shear_key_distance,
+                            shear_key_width, shear_key_thickness,
+                            enable_pile=False, pile_offset=0.5, L_pile=10.0,
+                            diameter_pile=0.4, pile_material='Concrete', Ec=34.8e3, Es=200e3):
     return run_2d_ssrm_analysis(
         toe=toe, heel=heel, bot_wall=bot_wall, top_wall=top_wall, h_ftg=h_ftg, Hw=Hw,
         h_soil=h_soil, h_soil_toe=h_soil_toe,
         gamma_soil_dry=gamma_soil_dry, gamma_soil_wet=gamma_soil_wet, phi=phi, q=q,
         surcharge_type=surcharge_type, width_surcharge=width_surcharge, offset_surcharge=offset_surcharge,
         Hwtr=Hwtr, Hwtr_front=Hwtr_front, gamma_w=gamma_w, kh=kh, gamma_c=gamma_c,
-        c_soil=c_soil, Ec=Ec
+        c_soil=c_soil, c_concrete=c_concrete, Es_soil=Es_soil, nu_soil=nu_soil,
+        taper_direction=taper_direction, include_shear_key=include_shear_key,
+        shear_key_distance=shear_key_distance, shear_key_width=shear_key_width,
+        shear_key_thickness=shear_key_thickness,
+        enable_pile=enable_pile, pile_offset=pile_offset, L_pile=L_pile,
+        diameter_pile=diameter_pile, pile_material=pile_material, Ec=Ec, Es=Es
     )
 
 ssrm_results = None
 
+update_splash(splash_placeholder, 55, "Computing Pile Foundation & Interactions", "Evaluating pile axial/lateral capacity & P-M interaction envelope...")
 
 if enable_pile:
     try:
@@ -4214,6 +4575,7 @@ if enable_pile:
 # GLOBAL STABILITY ANALYSIS (always runs)
 # =========================================================
 try:
+    update_splash(splash_placeholder, 80, "Solving XSLOPE 2D SSRM Slope Stability", "Meshing tri6 quadratic elements & computing Mohr-Coulomb viscoplastic failure surface...")
     # 2D SSRM Slope Stability Analysis
     ssrm_results = get_cached_ssrm_results(
         toe=toe,
@@ -4237,8 +4599,21 @@ try:
         kh=PGA * FPGA,
         gamma_c=gamma_c,
         c_soil=c_soil,
-        Ec=Ec * 1000.0,  # MPa to kPa
-        taper_direction=taper_direction
+        c_concrete=c_concrete,
+        Es_soil=Es_soil,
+        nu_soil=nu_soil,
+        taper_direction=taper_direction,
+        include_shear_key=include_shear_key,
+        shear_key_distance=shear_key_distance if include_shear_key else 0.0,
+        shear_key_width=shear_key_width if include_shear_key else 0.0,
+        shear_key_thickness=shear_key_thickness if include_shear_key else 0.0,
+        enable_pile=enable_pile,
+        pile_offset=pile_offset,
+        L_pile=L_pile,
+        diameter_pile=diameter_pile,
+        pile_material=pile_material,
+        Ec=Ec,
+        Es=Es
     )
 
 except Exception as e:
@@ -5704,12 +6079,14 @@ if enable_pile:
     </table>
     """, unsafe_allow_html=True)
 
+update_splash(splash_placeholder, 95, "Rendering Design Dashboard", "Finalizing figures, rendering verification metrics, and preparing report assets...")
+
 if ssrm_results is not None:
     st.markdown("---")
     with st.container(border=True):
         st.subheader("🧱 Global Stability Analysis (2D SSRM)")
         st.markdown(
-            '<div class="section-desc">Global slope stability analysis using 2D Strength Reduction Method (SRM) with OpenSeesPy (Griffiths & Lane 1999 displacement catastrophe method).</div>',
+            '<div class="section-desc">Global slope stability analysis using 2D Strength Reduction Method (SSRM) with XSLOPE & OpenSees (real wall polygon & Mohr-Coulomb model).</div>',
             unsafe_allow_html=True
         )
         fs_ssrm = ssrm_results.get('FS', None)
@@ -5739,26 +6116,169 @@ if ssrm_results is not None:
         with col_m2:
             st.markdown(f"<div style='margin-top: 25px;'>Status: {status_span(ssrm_pass)}</div>", unsafe_allow_html=True)
         
-        # Plot
+        # 10. Slope Geometry & Inputs Plot
+        st.markdown("### 1. Slope Geometry & Inputs")
         try:
-            from xslope.plot_fem import plot_shear_strain_contours
-            fig_ssrm, ax = plt.subplots(1, 1, figsize=(10, 4))
+            import matplotlib
+            matplotlib.use('Agg')
+            from xslope.plot import plot_inputs
             
-            # Shear Strain Contour (failure surface)
-            plot_shear_strain_contours(ax, ssrm_results['fem_data'], ssrm_results['last_solution'], show_mesh=True)
-            ax.set_title(f"Viscoplastic Shear Strain (Failure Surface) (F={fs_str})", fontsize=11, fontweight='bold')
+            plt.figure(figsize=(10, 4.5))
+            plot_inputs(ssrm_results['slope_data'], figsize=(10, 4.5))
+            fig_inputs = plt.gcf()
+            fig_inputs.tight_layout()
+            st.pyplot(fig_inputs)
+            plt.close(fig_inputs)
+        except Exception as e_inputs:
+            st.error(f"Error plotting Slope Geometry & Inputs: {e_inputs}")
+
+        # 11. FEM Data Summary (FEM.Data)
+        st.markdown("### 2. FEM Data Summary (FEM.Data)")
+        try:
+            fem_data_dict = ssrm_results['fem_data']
+            n_nodes = len(fem_data_dict['nodes'])
+            n_elems = len(fem_data_dict['elements'])
+            elem_mats = fem_data_dict['element_materials']
+            soil_count = int(np.sum(elem_mats == 1))
+            conc_count = int(np.sum(elem_mats == 2))
             
-            fig_ssrm.tight_layout()
-            try:
-                import os
-                os.makedirs("report_temp", exist_ok=True)
-                fig_ssrm.savefig("report_temp/stability_ssrm.png", dpi=150, bbox_inches='tight')
-            except Exception:
-                pass
-            st.pyplot(fig_ssrm)
-            plt.close(fig_ssrm)
+            n_fixed = int(np.sum(fem_data_dict['bc_type'] == 1))
+            n_roller = int(np.sum(fem_data_dict['bc_type'] == 2))
+            
+            u_arr = fem_data_dict.get('u', None)
+            has_u = u_arr is not None and len(u_arr) > 0 and u_arr.max() > 0
+            u_max_str = f"{u_arr.max():.2f} kPa" if has_u else "None (Dry)"
+            
+            n_pile_elems = fem_data_dict.get('n_pile_elements', 0)
+            pile_info_bullet = f"\n                - **Pile Reinforcement Elements:** `{n_pile_elems}` beam elements (Toe & Heel rows, L = `{L_pile:.1f}`m, D = `{diameter_pile:.2f}`m)" if enable_pile else ""
+            
+            circles_list = ssrm_results.get('slope_data', {}).get('circles', [])
+            if circles_list:
+                c1 = circles_list[0]
+                circles_info_bullet = f"\n                - **Starting Circles (XSLOPE):** `{len(circles_list)}` circles generated ($X_o={c1['Xo']:.2f}, Y_o={c1['Yo']:.2f}, R={c1['R']:.2f}\\text{{ m}}$)"
+            else:
+                circles_info_bullet = ""
+
+            col_d1, col_d2 = st.columns([1, 1.3])
+            with col_d1:
+                st.markdown(f"""
+                **Mesh & Domain Parameters:**
+                - **Total Mesh Nodes:** `{n_nodes}`
+                - **Total 2D Elements (`tri6`):** `{n_elems}`
+                - **Soil Zone Elements:** `{soil_count}`
+                - **Concrete Wall Elements:** `{conc_count}`{pile_info_bullet}{circles_info_bullet}
+                - **Boundary Constraints:** `{n_fixed}` fixed base nodes, `{n_roller}` roller side nodes
+                - **Max Pore Pressure ($u_{{max}}$):** `{u_max_str}`
+                """)
+            with col_d2:
+                # Material Summary Table
+                mats_list = [
+                    {
+                        "Material": "Soil",
+                        "Model": "Mohr-Coulomb",
+                        "γ (kN/m³)": f"{gamma_soil_dry:.1f}",
+                        "γ_sat (kN/m³)": f"{gamma_soil_wet:.1f}",
+                        "c (kPa)": f"{c_soil:.1f}",
+                        "φ (°)": f"{phi:.1f}",
+                        "E (kPa)": f"{Es_soil:.1f}",
+                        "ν": f"{nu_soil:.2f}",
+                        "t_cut": "0.0",
+                        "Pore Pressure": "Piezo" if has_u else "None"
+                    },
+                    {
+                        "Material": "Concrete Wall",
+                        "Model": "Mohr-Coulomb",
+                        "γ (kN/m³)": f"{gamma_c:.1f}",
+                        "γ_sat (kN/m³)": "-",
+                        "c (kPa)": f"{c_concrete:.1f}",
+                        "φ (°)": "40.0",
+                        "E (kPa)": "40000.0",
+                        "ν": "0.15",
+                        "t_cut": "0.0",
+                        "Pore Pressure": "None"
+                    }
+                ]
+                if enable_pile:
+                    E_pile_val = (Es if pile_material == 'Steel' else Ec) * 1000.0
+                    mats_list.append({
+                        "Material": f"Pile ({pile_material})",
+                        "Model": "Beam / Pile 1D",
+                        "γ (kN/m³)": "-",
+                        "γ_sat (kN/m³)": "-",
+                        "c (kPa)": "-",
+                        "φ (°)": "-",
+                        "E (kPa)": f"{E_pile_val:.1f}",
+                        "ν": "-",
+                        "t_cut": "-",
+                        "Pore Pressure": "None"
+                    })
+                mat_df = pd.DataFrame(mats_list)
+                st.dataframe(mat_df, hide_index=True, use_container_width=True)
+
+            # FEM Mesh plot with material zones
+            from xslope.plot_fem import plot_fem_data
+            plt.figure(figsize=(10, 4.5))
+            plot_fem_data(ssrm_results['fem_data'], figsize=(10, 4.5), show_bc=True)
+            fig_mesh = plt.gcf()
+            fig_mesh.tight_layout()
+            st.pyplot(fig_mesh)
+            plt.close(fig_mesh)
+        except Exception as e_data:
+            st.error(f"Error displaying FEM.Data: {e_data}")
+
+        # 12. FEM.result (Viscoplastic Shear Strain Failure Plot)
+        st.markdown("### 3. FEM Result (FEM.result)")
+        try:
+            sol = ssrm_results.get('last_solution', None)
+            if sol is not None and isinstance(sol, dict):
+                from xslope.plot_fem import plot_shear_strain_contours
+                fig_ssrm, ax = plt.subplots(1, 1, figsize=(10, 4.5))
+                
+                plot_shear_strain_contours(ax, ssrm_results['fem_data'], sol, show_mesh=True)
+                ax.set_title(f"Viscoplastic Shear Strain (Failure Surface) (FS = {fs_str})", fontsize=11, fontweight='bold')
+                
+                fig_ssrm.tight_layout()
+                try:
+                    import os
+                    os.makedirs("report_temp", exist_ok=True)
+                    fig_ssrm.savefig("report_temp/stability_ssrm.png", dpi=150, bbox_inches='tight')
+                except Exception:
+                    pass
+                st.pyplot(fig_ssrm)
+                plt.close(fig_ssrm)
+            else:
+                st.info("No convergence solution available to plot shear strain contours.")
         except Exception as e_ssrm:
-            st.error(f"Error plotting 2D SSRM: {e_ssrm}")
+            st.error(f"Error plotting 2D SSRM result: {e_ssrm}")
+
+if splash_placeholder is not None:
+    splash_placeholder.empty()
+    st.session_state["trigger_splash"] = False
+
+if st.session_state.get("trigger_report_splash", False):
+    st.session_state["trigger_report_splash"] = False
+    report_splash = st.empty()
+    
+    update_splash(report_splash, 20, "Exporting Diagrams & High-Res Plots", "Exporting geometry, mesh, and SSRM failure surface plots...")
+    os.makedirs("report_temp", exist_ok=True)
+    export_report_assets()
+    
+    pdf_filename = "retaining_wall_report.pdf"
+    docx_filename = "retaining_wall_report.docx"
+    pdf_path = os.path.join("report_temp", pdf_filename)
+    docx_path = os.path.join("report_temp", docx_filename)
+    
+    update_splash(report_splash, 55, "Generating Word Document (.docx)", "Building calculation tables, checklist, and embedded figures...")
+    generate_docx_report(docx_path)
+    
+    update_splash(report_splash, 85, "Compiling PDF Report (.pdf)", "Generating vector PDF engineering report with ReportLab...")
+    generate_pdf_reportlab(pdf_path)
+    
+    update_splash(report_splash, 100, "Report Generation Complete", "Opening export dialog...")
+    import time
+    time.sleep(0.2)
+    report_splash.empty()
+    st.session_state["trigger_report_dialog"] = True
 
 if st.session_state.get("trigger_report_dialog", False):
     st.session_state["trigger_report_dialog"] = False
